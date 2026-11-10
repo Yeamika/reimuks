@@ -1,4 +1,8 @@
-[submodule "devices/w202ds"]
-	path = devices/w202ds
+[submodule "w202ds/kernel"]
+	path = w202ds/kernel
 	url = https://github.com/Yeamika/w202ds-linux.git
 	branch = 6.18.35
+[submodule "w202ds/boot"]
+	path = w202ds/boot
+	url = https://github.com/Yeamika/w202ds-linux.git
+	branch = boot

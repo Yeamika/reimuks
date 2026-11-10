@@ -75,3 +75,15 @@ rootfs 默认用 ext4。initramfs 核对 rootfs 的 kernel release 和 Image 身
 管理账号也需部署者配置：同一命令增加 `--user root` 可设置目标 root 密码。初版不为 `reimuks` 自动授予 sudo 权限。
 
 构建工具固定使用 [PRoot v5.5.0](https://github.com/proot-me/proot/releases/tag/v5.5.0) 的上游静态二进制，并校验发布资产的 SHA-256；ARM64 用户态模拟器及包元数据来自 Debian 的签名仓库。
+
+## W202DS 工程入口
+
+设备入口统一放在 `w202ds/`，替代原 `devices/w202ds`：
+
+```text
+w202ds/
+├── kernel -> ../../w202ds-linux/6.18.35
+└── boot   -> ../../w202ds-boot
+```
+
+Git 中两项都是固定提交的 submodule/gitlink，远程同为 `Yeamika/w202ds-linux`，分别对应 `6.18.35` 与 `boot` 分支；本地使用上述相对符号链接。当前 boot 及 pj4edk2 中间件的源码提交只保存在本地，它们的远端分支只发布 readme.md，因此本地固定源码提交不保证能从远端获取。这套本地布局不能直接当作已经发布、可全新递归克隆的源码发行版。
