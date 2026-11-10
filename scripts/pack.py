@@ -108,7 +108,7 @@ def initramfs():
     server = BUILD/'server/rootfs'
     shutil.copyfile(server/'usr/bin/busybox',root/'bin/busybox')
     (root/'bin/busybox').chmod(0o755)
-    for app in ('sh','mount','cat','tr','modprobe','mdev','sleep','uname','mkdir','switch_root','setsid','cttyhack','reboot'):
+    for app in ('sh','mount','cat','tr','wc','tail','od','modprobe','mdev','sleep','uname','mkdir','switch_root','setsid','cttyhack','reboot'):
         (root/'bin'/app).symlink_to('busybox')
     shutil.copyfile(server/'usr/sbin/blkid',root/'sbin/blkid')
     (root/'sbin/blkid').chmod(0o755)

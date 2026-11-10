@@ -53,7 +53,7 @@ python3 scripts/verify.py
 
 initramfs 使用 LinuxBoot 所需的 **legacy LZ4（魔数 `0x184c2102`）+ newc CPIO**，不是 gzip 或现代 LZ4 frame。`/w202diag` 指向 `/init`，兼容现有内核强制命令行。
 
-根分区选择优先读取 DT `/chosen/w202,root-partuuid`，否则读取内核命令行 `root=PARTUUID=…`、`root=UUID=…`、`root=LABEL=…` 或 `root=/dev/…`，等待最多 60 秒。当前没有内置真实分区 ID，避免误选设备分区。DT 消费逻辑是本项目新增；启动器仍需实现相应属性写入，详见 [DTB 约定](boot/doces/efi_dtbchosen.md)。`CONFIG_CMDLINE_FORCE=y` 的内核可能忽略启动器传入的 `root=`，应使用 DT 属性或重编译内核配置。
+根分区选择优先读取 DT `/chosen/w202,root-partuuid`，否则读取内核命令行 `root=PARTUUID=…`、`root=UUID=…`、`root=LABEL=…` 或 `root=/dev/…`，等待最多 60 秒。当前没有内置真实分区 ID，避免误选设备分区。DT 消费逻辑是本项目新增；本地 LinuxBoot 已实现相应属性写入，详见 [DTB 约定](boot/doces/efi_dtbchosen.md)。`CONFIG_CMDLINE_FORCE=y` 的内核可能忽略启动器传入的 `root=`，应使用 DT 属性或重编译内核配置。
 
 rootfs 默认用 ext4。initramfs 核对 rootfs 的 kernel release 和 Image 身份后切换到 systemd。内核需内建存储和 ext4 驱动；其他需要提前加载的模块填入 initramfs 的 `etc/early-modules`。当前初版不提前加载板级显示、无线等模块，rootfs 由标准 udev 按 modalias 加载。
 
@@ -78,12 +78,14 @@ rootfs 默认用 ext4。initramfs 核对 rootfs 的 kernel release 和 Image 身
 
 ## W202DS 工程入口
 
-设备入口统一放在 `w202ds/`，替代原 `devices/w202ds`：
+设备入口保留 `devices/` 分组，W202DS 放在 `devices/w202ds/`：
 
 ```text
-w202ds/
-├── kernel -> ../../w202ds-linux/6.18.35
-└── boot   -> ../../w202ds-boot
+devices/w202ds/
+├── kernel -> ../../../w202ds-linux/6.18.35
+└── boot   -> ../../../w202ds-boot
 ```
 
 Git 中两项都是固定提交的 submodule/gitlink，远程同为 `Yeamika/w202ds-linux`，分别对应 `6.18.35` 与 `boot` 分支；本地使用上述相对符号链接。当前 boot 及 pj4edk2 中间件的源码提交只保存在本地，它们的远端分支只发布 readme.md，因此本地固定源码提交不保证能从远端获取。这套本地布局不能直接当作已经发布、可全新递归克隆的源码发行版。
+
+启动包组装入口为 `scripts/boot_bundle.py`，具体输入与 ESP 路径见 [交接说明](boot/doces/efi_dtbchosen.md#本地-efi--initramfs-组装2026-11-10)。

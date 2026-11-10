@@ -2,7 +2,7 @@
 
 本文记录三类启动参数。LinuxBoot 在交接内核前将它们写入 DTB 的 `/chosen` 节点，Linux 内核及 initramfs 分别读取。
 
-W202DS 生产方状态以 2026-11-08 检查的板级源码为准。2026-11-10，REIMUKS 在 `initramfs/init` 新增 rootfs 分区属性消费逻辑；LinuxBoot 写入该属性仍待实现，尚未完成实机联调。
+W202DS 生产方状态以 2026-11-08 检查的板级源码为准。2026-11-10，REIMUKS 在 `initramfs/init` 新增 rootfs 分区属性消费逻辑；LinuxBoot 已在本地实现该属性写入，尚未完成实机联调。
 
 ```text
 Boot 页面选择启动项
@@ -17,7 +17,7 @@ Boot 页面选择启动项
 | 参数 | DTB 属性 | 接收方 | 当前状态 |
 | --- | --- | --- | --- |
 | initramfs 内存范围 | `linux,initrd-start`、`linux,initrd-end` | Linux 内核 | W202DS 已实现 |
-| rootfs 分区 | `w202,root-partuuid` | initramfs | REIMUKS 已新增读取，LinuxBoot 写入待实现 |
+| rootfs 分区 | `w202,root-partuuid` | initramfs | REIMUKS 已新增读取，LinuxBoot 本地写入已实现 |
 | 启动显示信息 | `pocketjs,boot-display` | Linux 早期控制台和 DRM 驱动 | W202DS 已实现 |
 
 ## 1. `linux,initrd-start` / `linux,initrd-end`
@@ -76,3 +76,27 @@ W202DS 当前编码为 **20 个大端 u32，共 80 字节**。生产方与消费
 - `w202ds-linux/6.18.35/integration/kernel/initramfs/try-persistent-root.sh`：原板级 initramfs 的根选择参考。
 - `w202ds-linux/6.18.35/Devices/drm/source/pj4edk-boot-display/pj4edk-boot-display.c`：早期显示交接。
 - `w202ds-linux/6.18.35/Devices/drm/source/baseline/w202_boot_console.c`：DRM 阶段的启动控制台。
+
+## 本地 EFI → initramfs 组装（2026-11-10）
+
+Server 读取 `EFI/DebianServer/root-partuuid`，KDE 读取
+`EFI/DebianKDE/root-partuuid`。文件严格为 36 字节 ASCII GPT UUID，
+不带换行或 NUL。缺少或格式错误时 EFI 停止启动，不沿用 DTB 中残留值。
+EFI 将其覆写为 `/chosen/w202,root-partuuid`，DT 属性带一个 NUL。
+initramfs 校验长度、字符和连字符位置，再按 PARTUUID 挂载 ext4。
+
+启动包通过 `scripts/boot_bundle.py` 组装 Android v4 `boot.img`、32 字节
+`payload.bin`、分区选择文件及共享 `EFI/W202DS/LINUX.DTB`。
+需要部署者提供实际板级 DTB 和实际根分区 PARTUUID；不会自动猜测分区。
+每个 profile 使用独立输出目录。合并进同一 ESP 时，两者必须使用同一 DTB，
+因为当前 EFI 加载路径共享该文件。EFI 可执行文件需由启动工程单独编译提供。
+
+```sh
+python3 scripts/boot_bundle.py --profile server \
+  --image build/kernel/Image --initrd build/artifacts/initramfs-arm64.cpio.lz4 \
+  --dtb /path/to/validated/LINUX.DTB --root-partuuid ACTUAL-GPT-PARTUUID \
+  --output build/esp-server
+```
+
+本地测试直接调用启动工程的 `LinuxParseImage` 检查组装格式与截断拒绝，
+不等同于 UEFI 或实机启动验收。CRC32 仅用于损坏检测。
