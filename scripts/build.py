@@ -82,7 +82,7 @@ def proot(root, command, bindings=()):
 
 
 def packages(profile):
-    p = json.loads((REPO / 'profiles' / f'{profile}.json').read_text())
+    p = json.loads((REPO / 'profiles' / (f'desktop/{profile}.json' if profile in ('server', 'kde') else f'{profile}.json')).read_text())
     return list(dict.fromkeys((packages(p['extends']) if 'extends' in p else []) + p['packages']))
 
 
@@ -157,7 +157,7 @@ def assemble(profile, state):
 def configure(profile):
     root = BUILD / profile / 'rootfs'
     state = BUILD / f'apt-{profile}'
-    target = json.loads((REPO / 'profiles' / f'{profile}.json').read_text())['target']
+    target = json.loads((REPO / 'profiles' / (f'desktop/{profile}.json' if profile in ('server', 'kde') else f'{profile}.json')).read_text())['target']
     script = '''#!/bin/sh
 set -eu
 export DEBIAN_FRONTEND=noninteractive LC_ALL=C

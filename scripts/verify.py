@@ -122,11 +122,11 @@ def main():
     output=BUILD/'artifacts'
     result={'initramfs':verify_initramfs(output/'initramfs-arm64.cpio.lz4')}
     for profile in ('server','kde'):
-        result[profile]=verify_rootfs(output/f'{profile}-arm64-rootfs.tar.gz',profile)
+        result[profile]=verify_rootfs(output/f'desktop-{profile}-arm64-rootfs.tar.gz',profile)
     (output/'verification.json').write_text(json.dumps(result,indent=2)+'\n')
     (output/'SHA256SUMS').write_text(''.join(f'{v["sha256"]}  {name}\n' for name,v in [
         ('initramfs-arm64.cpio.lz4',result['initramfs']),
-        ('server-arm64-rootfs.tar.gz',result['server']),('kde-arm64-rootfs.tar.gz',result['kde'])]))
+        ('desktop-server-arm64-rootfs.tar.gz',result['server']),('desktop-kde-arm64-rootfs.tar.gz',result['kde'])]))
     print(json.dumps(result,indent=2))
 
 

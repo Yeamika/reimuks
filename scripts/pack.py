@@ -160,13 +160,13 @@ test ! -s /work/dpkg-audit.txt
 tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
  --exclude=./dev/* --exclude=./proc/* --exclude=./sys/* --exclude=./run/* \
  --exclude=./tmp/* --exclude=./host-rootfs --exclude=./packages \
- --exclude=./work --exclude=./output -cf /output/{profile}-arm64-rootfs.tar -C / .
+ --exclude=./work --exclude=./output -cf /output/desktop-{profile}-arm64-rootfs.tar -C / .
 ''',0o755)
     output=BUILD/'artifacts'
     output.mkdir(exist_ok=True)
     proot(root,['/usr/bin/fakeroot-tcp','-i','/work/fakeroot.state',
                 '/bin/sh','/work/archive.sh'],[f'{work}:/work',f'{output}:/output'])
-    source=output/f'{profile}-arm64-rootfs.tar'
+    source=output/f'desktop-{profile}-arm64-rootfs.tar'
     dest=source.with_suffix('.tar.gz')
     with source.open('rb') as src, dest.open('wb') as target:
         with gzip.GzipFile(filename='',mode='wb',fileobj=target,mtime=0,compresslevel=6) as gz:
@@ -180,7 +180,7 @@ tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
         if fields[0] in ('root', 'reimuks'):
             login[fields[0]] = 'locked' if fields[1].startswith(('!', '*')) else 'configured'
     write(output/f'{profile}.manifest.json',json.dumps({
-        'profile':profile,'suite':'trixie','architecture':'arm64','kernel':meta,
+        'profile':'desktop/'+profile,'kernel_flavor':'desktop','suite':'trixie','architecture':'arm64','kernel':meta,
         'packages':debs,'sha256':digest(dest),'hardware_tested':False,
         'credentials':login},indent=2)+'\n')
 

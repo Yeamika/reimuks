@@ -1,0 +1,6 @@
+{
+  "status": "placeholder",
+  "extends": "desktop/server",
+  "desktop": "gnome",
+  "packages": []
+}

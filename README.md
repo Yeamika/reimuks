@@ -1,15 +1,50 @@
 # REIMUKS
 
-REIMUKS 是面向多个设备的 Linux 发行版组装项目。本轮在本目录构建 Debian 13（trixie）ARM64 的 initramfs、Server rootfs 和 KDE rootfs。
+REIMUKS 是面向多个设备的 Linux 发行版组装项目。本轮在本目录构建 Debian 13（trixie）ARM64 的 initramfs、desktop/server 命令行 rootfs 和 desktop/kde rootfs。
 
 本轮只接收预编译内核与匹配模块，不编译内核，不导入板级用户态程序、服务、配置、私有固件或修改版 Mesa / ModemManager。KDE 使用 Debian 自带软件栈，能否在 W202DS 上显示桌面、使用 GPU 和外设仍须实机验证。
+
+## 统一选择构建目标
+
+```sh
+python3 reimuks.py --list-boards
+# 工具链只安装在 build/ 下；需要宿主已有 rustup、APT、dpkg-deb。
+python3 scripts/prepare_boot_tools.py
+. build/boot-tools/env.sh
+python3 reimuks.py --board w202ds --target uefi efi --output build/boot/w202ds
+python3 reimuks.py --board w202ds --target initramfs
+python3 reimuks.py --board w202ds --target rootfs --profile desktop/server desktop/kde
+```
+
+`--target` 可同时选 `uefi efi initramfs rootfs`，boot 输出目录必须是新目录。
+`uefi` 生成带 PocketJS 的 `w202ds.fd` 和 `ramboot.img`；`efi` 编译六个
+ESP 应用，其中 DebianServer/DebianKde 分别用于 desktop/server 与 desktop/kde。
+旧 ESP 路径名称保留兼容性，不代表存在 Server 专用内核。
+最终 boot 文件也汇集到 `build/artifacts/w202ds/boot/`。
+这两个目标不组装 5 MiB LK 刷写容器、不刷机，也不自动提供 Linux DTB 或根分区。
+
+rootfs 结构为 `desktop/{server,kde,gnome,niri}` 和顶层 `server`。
+目前只有 `desktop/server`、`desktop/kde` 可构建；GNOME、Niri 占位；
+顶层 `server` 因 W202DS 没有 Server 内核而占位，选择后在构建前报错。
+详情见 [profile 定义](profiles/README.md)。底层脚本及缓存中的 `server`、`kde`
+是兼容现有构建目录的内部简称，分别对应上述两个 desktop 配置。
+
+initramfs/rootfs 继续只消费已导入的内核与模块，不编译内核或板级用户态。
+第一次构建 initramfs 时会按需准备 desktop/server 的最小用户态作为 BusyBox、
+blkid 的来源。已配置 rootfs 会直接重新打包；需要更新软件包时先显式执行下方
+底层 fetch/configure 流程，避免无意改动已设置的账号。
+
+新增板子时放入 `devices/<board>/board.json`、`kernel`、`boot`；
+`boot_builder` 指向板级 boot 项目自己的构建适配器，REIMUKS 负责选择、调度、
+验证与收集输出。工具链按板级适配器要求提供，不把 W202DS 硬件代码搬入发行版。
+当前只实现 W202DS，其他板子尚未声明支持。
 
 ## 构建目录
 
 专属工作区：`/state/workspace/pushup/reimuks`。所有下载、工具、解包目录、日志和产物均在忽略的 `build/` 内；不会安装到宿主系统。
 
-- `profiles/server.json`：命令行系统，`multi-user.target`。
-- `profiles/kde.json`：继承 Server，增加 Plasma、SDDM、Konsole、Dolphin、NetworkManager 和 PipeWire，`graphical.target`。
+- `profiles/desktop/server.json`：使用 desktop 内核的命令行系统，`multi-user.target`。
+- `profiles/desktop/kde.json`：继承 desktop/server，增加 Plasma、SDDM、Konsole、Dolphin、NetworkManager 和 PipeWire，`graphical.target`。
 - `initramfs/init`：等待根分区、验证内核身份、挂载 ext4、切换到 systemd。
 - `scripts/build.py`：隔离 APT 状态，下载、解包及配置 ARM64 软件包。
 - `scripts/pack.py`：导入内核、打包 initramfs 和 rootfs。
@@ -62,8 +97,8 @@ rootfs 默认用 ext4。initramfs 核对 rootfs 的 kernel release 和 Image 身
 最终输出在 `build/artifacts/`：
 
 - `initramfs-arm64.cpio.lz4`
-- `server-arm64-rootfs.tar.gz`
-- `kde-arm64-rootfs.tar.gz`
+- `desktop-server-arm64-rootfs.tar.gz`
+- `desktop-kde-arm64-rootfs.tar.gz`
 - `SHA256SUMS`、`verification.json`、各自 manifest 和软件包版本清单。
 
 两个 rootfs 都带相同 Image、配置及模块。rootfs tar 包用于由有权限的部署环境解包到目标 ext4 分区，须保留数字 UID/GID、权限、ACL 和扩展属性。这不是分区磁盘镜像，也不包含 EFI / LinuxBoot 更新。

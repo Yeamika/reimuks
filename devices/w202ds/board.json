@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "board": "w202ds",
+  "architecture": "arm64",
+  "boot_builder": "boot/pocketjs4edk2_uefi/build-firmware.py",
+  "profiles": [
+    "desktop/server",
+    "desktop/kde"
+  ],
+  "kernel_release_suffix": "-w202ds-",
+  "placeholders": {
+    "desktop/gnome": "not implemented",
+    "desktop/niri": "not implemented",
+    "server": "no server kernel provided"
+  }
+}

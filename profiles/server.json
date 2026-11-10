@@ -1,26 +1,5 @@
 {
-  "suite": "trixie",
-  "architecture": "arm64",
-  "target": "multi-user.target",
-  "packages": [
-    "apt",
-    "systemd-sysv",
-    "udev",
-    "dbus",
-    "kmod",
-    "util-linux",
-    "iproute2",
-    "iputils-ping",
-    "ca-certificates",
-    "locales",
-    "tzdata",
-    "console-setup",
-    "bash-completion",
-    "nano",
-    "less",
-    "fakeroot",
-    "busybox-static",
-    "adduser",
-    "systemd-resolved"
-  ]
+  "status": "placeholder",
+  "reason": "W202DS does not provide a server kernel",
+  "packages": []
 }
