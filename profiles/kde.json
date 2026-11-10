@@ -1,0 +1,5 @@
+{
+  "suite": "trixie", "architecture": "arm64", "target": "graphical.target",
+  "extends": "server",
+  "packages": ["kde-plasma-desktop", "plasma-workspace", "sddm", "konsole", "dolphin", "network-manager", "plasma-nm", "pipewire-audio", "wireplumber", "xwayland", "fonts-noto-core", "mesa-utils"]
+}
