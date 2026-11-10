@@ -1,0 +1,4 @@
+[submodule "devices/w202ds"]
+	path = devices/w202ds
+	url = https://github.com/Yeamika/w202ds-linux.git
+	branch = 6.18.35
