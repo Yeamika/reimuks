@@ -19,7 +19,9 @@ class AccelerationTest(unittest.TestCase):
             entry.parent.mkdir(parents=True)
             content = '[Desktop Entry]\nExec=/usr/bin/google-chrome-stable %U\n'
             entry.write_text(content)
+            mode = root.stat().st_mode & 0o7777
             acceleration.install(root, 'kde', distributions.load_distribution())
+            self.assertEqual(root.stat().st_mode & 0o7777, mode)
             self.assertEqual(entry.read_text(), content)
             self.assertIn('/usr/bin/reimuks-chrome %U', (root/'etc/skel/.local/share/applications/google-chrome.desktop').read_text())
             self.assertTrue((root/'usr/bin/reimuks-chrome').stat().st_mode & 0o111)

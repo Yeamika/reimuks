@@ -1,6 +1,5 @@
 """Install desktop API policy; hardware drivers belong to board providers."""
 from pathlib import Path
-import shutil
 
 
 def install(root, profile, distribution):
@@ -14,7 +13,8 @@ def install(root, profile, distribution):
             (root/relative).unlink(missing_ok=True)
         return
     source = Path(__file__).resolve().parents[1]/'distributions'/distribution['id']/'rootfs'
-    shutil.copytree(source, root, dirs_exist_ok=True, symlinks=True)
+    from board_userspace import install_template
+    install_template(root, source)
     desktop = root/'usr/share/applications/google-chrome.desktop'
     text = desktop.read_text()
     lines = []
