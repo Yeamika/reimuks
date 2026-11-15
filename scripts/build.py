@@ -136,7 +136,7 @@ def apt(state, *args, **kw):
     return run(['apt-get', *args], env=env, **kw)
 
 
-def proot(root, command, bindings=(), **kwargs):
+def proot_command(root, command, bindings=()):
     args = [BUILD / 'tools/proot', '-0', '-r', root, '-w', '/',
             '-b', '/dev', '-b', '/proc',
             '-q', TOOLS / 'usr/bin/qemu-aarch64']
@@ -146,7 +146,12 @@ def proot(root, command, bindings=(), **kwargs):
            if not key.startswith('XDG_') and key not in ('QT_PLUGIN_PATH', 'QML2_IMPORT_PATH')}
     env.update(HOME='/root', USER='root', LOGNAME='root', LC_ALL='C', SYSTEMD_OFFLINE='1',
                DEBIAN_FRONTEND='noninteractive', PATH='/usr/sbin:/usr/bin:/sbin:/bin')
-    return run(args + command, env=env, **kwargs)
+    return args + command, env
+
+
+def proot(root, command, bindings=(), **kwargs):
+    args, env = proot_command(root, command, bindings)
+    return run(args, env=env, **kwargs)
 
 
 def packages(profile):

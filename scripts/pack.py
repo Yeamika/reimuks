@@ -175,6 +175,32 @@ def initramfs(early_modules=(), output=None):
         'early_modules':early_modules, 'hardware_tested':False},indent=2)+'\n')
 
 
+def compress_stream(command, environment, destination):
+    """Keep target tar metadata but compress on the build host."""
+    import subprocess
+    producer = subprocess.Popen(list(map(str, command)), env=environment, stdout=subprocess.PIPE)
+    try:
+        with destination.open('wb') as output:
+            compressor = subprocess.Popen(['gzip', '-n', '-6'], stdin=producer.stdout, stdout=output)
+            producer.stdout.close()
+            compressed = compressor.wait()
+        produced = producer.wait()
+        if produced or compressed:
+            raise subprocess.CalledProcessError(produced or compressed, command)
+    finally:
+        producer.stdout.close()
+        if producer.poll() is None:
+            producer.terminate()
+            producer.wait()
+
+
+def compress_rootfs(root, work, output, profile):
+    command, environment = backend.proot_command(root,
+        ['/usr/bin/fakeroot-tcp', '-i', '/work/archive-fakeroot.state',
+         '/bin/sh', '/work/archive.sh'], [f'{work}:/work', f'{output}:/output'])
+    compress_stream(command, environment, output/f'desktop-{profile}-arm64-rootfs.tar.gz.part')
+
+
 def rootfs(profile, user_overlay=None):
     os.umask(0o022)
     if user_overlay is not None:
@@ -229,6 +255,7 @@ def rootfs(profile, user_overlay=None):
     write(work/'archive.sh',f'''#!/bin/sh
 set -eu
 umask 022
+{{
 systemd-sysusers
 passwd -l root
 passwd -l reimuks
@@ -237,6 +264,7 @@ cp -an /etc/skel/. /home/reimuks/
 chown -R reimuks:reimuks /home/reimuks
 dpkg --audit > /work/dpkg-audit.txt
 test ! -s /work/dpkg-audit.txt
+}} >&2
 tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
  --exclude=./dev/* --exclude=./proc/* --exclude=./sys/* --exclude=./run/* \
  --exclude=./tmp/* --exclude=./host-rootfs --exclude=./packages \
@@ -244,12 +272,11 @@ tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
  --exclude=./boot/Image-* --exclude=./boot/config-* \
  --exclude=./usr/lib/reimuks/kernel-release --exclude=./usr/lib/reimuks/kernel-image.sha256 \
  --exclude=./usr/lib/reimuks/kernel-manifest.json \
- --exclude=./work --exclude=./output -I "gzip -n -6" -cf /output/desktop-{profile}-arm64-rootfs.tar.gz.part -C / .
+ --exclude=./work --exclude=./output -cf - -C / .
 ''',0o755)
     output=backend.artifact_directory()
     output.mkdir(parents=True, exist_ok=True)
-    proot(root,['/usr/bin/fakeroot-tcp','-i','/work/archive-fakeroot.state',
-                '/bin/sh','/work/archive.sh'],[f'{work}:/work',f'{output}:/output'])
+    compress_rootfs(root, work, output, profile)
     dest=output/f'desktop-{profile}-arm64-rootfs.tar.gz'
     partial=dest.with_suffix(dest.suffix+'.part')
     partial.replace(dest)

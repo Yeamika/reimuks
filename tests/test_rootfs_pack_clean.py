@@ -1,6 +1,8 @@
 """Private overlays must not contaminate base packages or follow archive links."""
 from pathlib import Path
 import io
+import gzip
+import subprocess
 import os
 import sys
 import tarfile
@@ -16,6 +18,14 @@ from fakeroot_state import relocate
 
 
 class CleanPackaging(unittest.TestCase):
+    def test_host_compression_stream_and_failed_producer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output=Path(tmp)/'image.gz.part'
+            rootfs_pack.compress_stream([sys.executable,'-c',"import sys;sys.stdout.buffer.write(b'payload')"],os.environ,output)
+            self.assertEqual(gzip.decompress(output.read_bytes()),b'payload')
+            with self.assertRaises(subprocess.CalledProcessError):
+                rootfs_pack.compress_stream([sys.executable,'-c','raise SystemExit(7)'],os.environ,output)
+
     def test_templates_preserve_package_directories_and_strip_source_group_write(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'root';source=Path(tmp)/'source'

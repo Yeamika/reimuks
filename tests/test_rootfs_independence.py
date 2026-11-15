@@ -42,7 +42,7 @@ class RootfsIndependence(unittest.TestCase):
                  patch.object(pack, 'install_board_rootfs') as install, \
                  patch.object(pack, 'prepare_board_rootfs'), \
                  patch.object(pack, 'verify_startup', return_value={'hardware_tested': False}), \
-                 patch.object(pack, 'proot', side_effect=archive):
+                 patch.object(pack, 'compress_rootfs', side_effect=archive):
                 pack.rootfs('kde')
                 # A removed integration file from the previous pack must not
                 # survive in either the configured source or the next package.
