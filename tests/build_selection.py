@@ -20,18 +20,26 @@ class SelectionTest(unittest.TestCase):
     def test_placeholders_do_not_start_build(self):
         with tempfile.TemporaryDirectory(dir=ROOT/'build') as temp:
             output=Path(temp)/'must-not-exist'
-            for profile in ['server','desktop/gnome','desktop/niri']:
+            for profile in ['server','desktop/niri']:
                 result=self.cli('--board','w202ds','--target','uefi','rootfs',
                                 '--profile',profile,'--output',str(output))
                 self.assertEqual(result.returncode,2)
                 self.assertIn('placeholder',result.stderr)
                 self.assertFalse(output.exists())
 
-    def test_unknown_board_and_missing_output(self):
+    def test_unknown_board_and_invalid_jobs(self):
         self.assertEqual(self.cli('--board','unknown','--target','uefi').returncode,2)
-        result=self.cli('--board','w202ds','--target','efi')
+        result=self.cli('--board','w202ds','--target','efi','--jobs','0')
         self.assertEqual(result.returncode,2)
-        self.assertIn('output',result.stderr)
+        self.assertIn('jobs',result.stderr)
+
+    def test_rootfs_options_are_rejected_for_other_targets(self):
+        for target in ('uefi', 'efi', 'initramfs'):
+            for option in (('--distribution', 'debian/trixie'), ('--profile', 'desktop/kde'),
+                           ('--accounts', 'private-accounts.json')):
+                result = self.cli('--board', 'w202ds', '--target', target, *option)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn('apply only to --target rootfs', result.stderr)
 
 
 if __name__ == '__main__': unittest.main()

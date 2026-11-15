@@ -6,16 +6,32 @@ exec </dev/console >/dev/console 2>&1
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t tmpfs tmpfs /run
+bootlog() {
+    if [ -w /dev/kmsg ]; then
+        printf '<6>reimuks-init: %s\n' "$*" > /dev/kmsg
+    else
+        printf 'reimuks-init: %s\n' "$*"
+    fi
+}
+bootlog 'initramfs started'
 rescue() {
-    echo "REIMUKS boot stopped: $*"
-    echo 'Type exit to reboot.'
+    bootlog "boot stopped: $*"
+    bootlog 'Rescue shell on /dev/console; type exit to reboot.'
     setsid cttyhack sh
     reboot -f
     while :; do sleep 3600; done
 }
+for hook in /usr/lib/reimuks/initramfs.d/*; do
+    [ -x "$hook" ] || continue
+    "$hook" || rescue "board init hook failed: ${hook##*/}"
+done
 # EFI writes a canonical UUID plus one NUL to the DT property.
 root=
-chosen=/sys/firmware/devicetree/base/chosen/w202,root-partuuid
+chosen=/sys/firmware/devicetree/base/chosen/pj4edk2,root-partuuid
+# Accept existing EFI loaders while migrating to the shared PJ4EDK2 contract.
+if [ ! -e "$chosen" ]; then
+    chosen=/sys/firmware/devicetree/base/chosen/w202,root-partuuid
+fi
 if [ -r "$chosen" ]; then
     [ "$(wc -c < "$chosen")" -eq 37 ] || rescue 'invalid DT root PARTUUID size'
     [ "$(tail -c 1 "$chosen" | od -An -tu1 | tr -d ' \n')" = 0 ] || rescue 'unterminated DT root PARTUUID'
@@ -35,12 +51,16 @@ if [ -z "$root" ]; then
         case "$arg" in root=*) root=${arg#root=} ;; esac
     done
 fi
-[ -n "$root" ] || rescue 'supply DT w202,root-partuuid or kernel root=PARTUUID=...'
+[ -n "$root" ] || rescue 'supply DT pj4edk2,root-partuuid or kernel root=PARTUUID=...'
+bootlog "root selector: $root"
 for module in $(cat /etc/early-modules); do
+    bootlog "loading early module: $module"
     modprobe "$module" || rescue "module failed: $module"
+    bootlog "early module loaded: $module"
 done
 n=0
 device=
+bootlog 'waiting for root block device'
 while [ "$n" -lt 60 ]; do
     mdev -s
     case "$root" in
@@ -53,6 +73,7 @@ while [ "$n" -lt 60 ]; do
     sleep 1
 done
 [ -n "$device" ] && [ -b "$device" ] || rescue "root not found: $root"
+bootlog "mounting root: $device"
 mount -t ext4 -o ro "$device" /newroot || rescue 'ext4 mount failed'
 release=$(uname -r)
 [ -f "/newroot/usr/lib/reimuks/kernel-release" ] || rescue 'rootfs has no kernel identity'
@@ -60,8 +81,10 @@ release=$(uname -r)
 [ "$(cat /newroot/usr/lib/reimuks/kernel-image.sha256)" = "$(cat /etc/kernel-image.sha256)" ] || rescue 'rootfs kernel build mismatch'
 [ -d "/newroot/usr/lib/modules/$release" ] || rescue 'rootfs modules missing'
 [ -x /newroot/sbin/init ] || rescue 'rootfs init missing'
+bootlog "rootfs identity verified: $release"
 mount -o remount,rw /newroot || rescue 'rootfs remount failed'
 mkdir -p /newroot/dev /newroot/proc /newroot/sys /newroot/run
+bootlog 'starting rootfs init'
 mount --move /dev /newroot/dev
 mount --move /proc /newroot/proc
 mount --move /sys /newroot/sys

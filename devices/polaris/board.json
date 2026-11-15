@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "board": "polaris",
+  "architecture": "arm64",
+  "boot_builder": "boot/pocketjs4edk2_uefi/build-firmware.py",
+  "profiles": [],
+  "supported_targets": [],
+  "status": "scaffold",
+  "unavailable_reason": "Polaris 7.1-rc1 kernel configuration, userspace policy and SDM845 boot port are pending",
+  "kernel_release_suffix": "-polaris",
+  "initramfs_early_modules": [],
+  "placeholders": {
+    "server": "Polaris 7.1-rc1 profile port is pending",
+    "desktop/server": "Polaris 7.1-rc1 profile port is pending",
+    "desktop/kde": "Polaris 7.1-rc1 profile port is pending",
+    "desktop/gnome": "Polaris 7.1-rc1 profile port is pending",
+    "desktop/niri": "Polaris 7.1-rc1 profile port is pending"
+  }
+}

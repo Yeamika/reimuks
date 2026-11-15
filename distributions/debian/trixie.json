@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "id": "debian/trixie",
+  "name": "Debian 13 (trixie)",
+  "backend": "apt-dpkg",
+  "suite": "trixie",
+  "architecture": "arm64",
+  "os_release": {
+    "ID": "debian",
+    "VERSION_CODENAME": "trixie"
+  },
+  "components": [
+    "main"
+  ],
+  "install_recommends": false,
+  "build_repositories": [
+    {
+      "uri": "https://ftp.debian.org/debian",
+      "suite": "trixie"
+    }
+  ],
+  "target_repositories": [
+    {
+      "uri": "https://deb.debian.org/debian",
+      "suite": "trixie"
+    },
+    {
+      "uri": "https://deb.debian.org/debian",
+      "suite": "trixie-updates"
+    },
+    {
+      "uri": "https://security.debian.org/debian-security",
+      "suite": "trixie-security"
+    }
+  ],
+  "profiles": {
+    "desktop/server": "trixie/desktop/server.json",
+    "desktop/kde": "trixie/desktop/kde.json",
+    "desktop/gnome": "trixie/desktop/gnome.json"
+  },
+  "additional_packages": "trixie/additional-packages.json"
+}

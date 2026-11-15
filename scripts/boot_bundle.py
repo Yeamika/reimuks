@@ -40,23 +40,54 @@ def main():
     for name in ('image', 'initrd', 'dtb', 'output'):
         p.add_argument('--'+name, type=Path, required=True)
     p.add_argument('--root-partuuid', required=True)
+    p.add_argument('--options', default='', help='kernel boot options, including systemd.unit if required')
+    p.add_argument('--legacy', action='store_true', help='emit the combined boot.img format for old EFI loaders')
     a = p.parse_args()
+    if len(a.options) >= 1024 or any(ord(c) < 32 or ord(c) > 126 for c in a.options):
+        p.error('options must be a single ASCII line shorter than 1024 bytes')
     image, initrd, dtb = (f.read_bytes() for f in (a.image, a.initrd, a.dtb))
     boot, meta = assemble(image, initrd, dtb, a.root_partuuid)
     # One output directory per profile avoids silently mixing shared DTBs.
-    a.output.mkdir(parents=True, exist_ok=False)
+    a.output = a.output.resolve()
+    if any(a.output == path.resolve() or a.output in path.resolve().parents
+           for path in (a.image, a.initrd, a.dtb)):
+        p.error('output must be separate from payload inputs')
+    receipt = a.output/'manifest.json'
+    if a.output.exists():
+        if not receipt.is_file():
+            p.error('refusing to replace an unrecognized output directory')
+        previous = json.loads(receipt.read_text())
+        if previous.get('profile') != a.profile or 'files' not in previous:
+            p.error('existing output belongs to another profile')
+        for name in previous['files']:
+            target = a.output/name
+            if not target.resolve().is_relative_to(a.output):
+                p.error('invalid previous artifact path')
+        for name in previous['files']:
+            (a.output/name).unlink(missing_ok=True)
+    a.output.mkdir(parents=True, exist_ok=True)
     profile = a.output/'EFI'/('DebianServer' if a.profile == 'server' else 'DebianKDE')
-    profile.mkdir(parents=True)
+    profile.mkdir(parents=True, exist_ok=True)
     common = a.output/'EFI'/'W202DS'
-    common.mkdir()
-    outputs = {profile/'boot.img': boot, profile/'payload.bin': meta,
-               profile/'root-partuuid': a.root_partuuid.encode('ascii'), common/'LINUX.DTB': dtb}
+    common.mkdir(exist_ok=True)
+    if a.legacy:
+        outputs = {profile/'boot.img': boot, profile/'payload.bin': meta,
+                   profile/'root-partuuid': a.root_partuuid.encode('ascii'), common/'LINUX.DTB': dtb}
+    else:
+        prefix = '/'+str(profile.relative_to(a.output)).replace('\\', '/')
+        config = (f'kernel={prefix}/Image\ninitramfs={prefix}/initramfs.cpio.lz4\n'
+                  f'dtb={prefix}/board.dtb\nmetadata={prefix}/payload.bin\n'
+                  f'root-partuuid={a.root_partuuid}\noptions={a.options}\n')
+        outputs = {profile/'Image': image, profile/'initramfs.cpio.lz4': initrd,
+                   profile/'board.dtb': dtb, profile/'payload.bin': meta,
+                   profile/'linuxboot.conf': config.encode('ascii')}
     for path, data in outputs.items():
         path.write_bytes(data)
     (a.output/'manifest.json').write_text(json.dumps({
         'profile': a.profile, 'root_partuuid': a.root_partuuid,
         'files': {str(path.relative_to(a.output)): hashlib.sha256(data).hexdigest()
                   for path, data in outputs.items()},
+        'format': 'legacy' if a.legacy else 'linuxboot.conf',
         'note': 'Payload only; requires matching separately built LinuxBoot EFI. CRC is not authentication.'
     }, indent=2)+'\n')
 

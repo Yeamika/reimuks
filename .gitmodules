@@ -6,3 +6,11 @@
 	path = devices/w202ds/boot
 	url = https://github.com/Yeamika/w202ds-linux.git
 	branch = boot
+[submodule "devices/polaris/kernel"]
+	path = devices/polaris/kernel
+	url = https://github.com/Yeamika/Polaris-linux.git
+	branch = 7.1-rc1
+[submodule "devices/polaris/boot"]
+	path = devices/polaris/boot
+	url = https://github.com/Yeamika/Polaris-linux.git
+	branch = boot

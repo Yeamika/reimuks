@@ -1,0 +1,16 @@
+[Unit]
+Description=Expand the W202DS console after multi-user startup
+DefaultDependencies=no
+Requires=w202-bsp.service
+After=basic.target multi-user.target w202-bsp.service
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/w202-display-login
+RemainAfterExit=yes
+TimeoutStartSec=15
+
+[Install]
+WantedBy=multi-user.target

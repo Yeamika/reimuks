@@ -8,7 +8,12 @@ from pathlib import Path
 import stat
 import struct
 import tarfile
+import argparse
+import os
+from board_userspace import verification_policy, verify_archive
 from build import BUILD, digest
+import build as backend
+from distributions import DEFAULT, identity, resolve_profile, check_os_release, check_package_versions
 
 
 def unpack_legacy(path):
@@ -53,38 +58,58 @@ def cpio_entries(data):
 
 def verify_initramfs(path):
     e=cpio_entries(unpack_legacy(path))
-    for name in ('init','w202diag','bin/busybox','sbin/blkid','lib/ld-linux-aarch64.so.1','etc/kernel-image.sha256'):
+    if 'etc/distribution.json' in e:
+        assert json.loads(e['etc/distribution.json'][1]) == identity(backend.DISTRIBUTION), 'Initramfs distribution differs'
+    else:
+        assert backend.DISTRIBUTION['id'] == DEFAULT, 'Legacy initramfs has no distribution identity'
+    for name in ('init','bin/busybox','bin/grep','bin/ln','bin/ip',
+                 'usr/lib/reimuks/initramfs.d/20-hardware',
+                 'sbin/blkid','lib/ld-linux-aarch64.so.1','etc/kernel-image.sha256'):
         assert name in e, name
-    assert e['w202diag'][1]==b'init'
+    policy = json.loads((backend.board_directory()/'board.json').read_text()).get('kernel_policy', {})
+    for name in policy.get('initramfs_forbidden_paths', []):
+        assert name not in e, name
     assert stat.S_ISCHR(e['dev/console'][0][1])
     for name in ('bin/busybox','sbin/blkid'):
         b=e[name][1]
         assert b[:4]==b'\x7fELF' and struct.unpack_from('<H',b,18)[0]==183,name
-    meta=json.loads((BUILD/'kernel/manifest.json').read_text())
+    meta=json.loads((backend.kernel_directory()/'manifest.json').read_text())
     assert e['etc/kernel-image.sha256'][1].decode().strip()==meta['image_sha256']
     assert sum(name.endswith('.ko') for name in e)==len(meta['module_hashes'])
     return {'entries':len(e),'bytes':path.stat().st_size,'sha256':digest(path)}
 
 
 def verify_rootfs(path,profile):
-    meta=json.loads((BUILD/'kernel/manifest.json').read_text())
+    policies = verification_policy(backend.board_directory(), profile)
     with tarfile.open(path,'r|gz') as t:
-        wanted={'etc/passwd','usr/bin/bash','var/lib/dpkg/status',
-                'usr/lib/reimuks/kernel-release','usr/lib/reimuks/kernel-image.sha256','etc/machine-id'}
+        wanted={'etc/passwd','usr/bin/bash','var/lib/dpkg/status','usr/lib/os-release',
+                'usr/lib/reimuks/distribution.json',
+                'etc/machine-id'}
+        for policy in policies:
+            wanted.update(policy.get('files', []))
+            wanted.update(policy.get('contains', {}))
         members={}
         contents={}
-        module_hashes={}
+        kernel_modules=[]
         for m in t:
             name=m.name.removeprefix('./')
             members[name]=m
             if name in wanted:
                 contents[name]=t.extractfile(m).read()
-            module_prefix=f'usr/lib/modules/{meta["release"]}/'
-            if name.startswith(module_prefix) and name.endswith('.ko'):
-                module_hashes[name.removeprefix(module_prefix)]=hashlib.file_digest(t.extractfile(m),'sha256').hexdigest()
-            if name==f'boot/Image-{meta["release"]}':
-                assert hashlib.file_digest(t.extractfile(m),'sha256').hexdigest()==meta['image_sha256']
+            if name.endswith('.ko') and m.isfile():
+                # Vim's Korean tutor is also named *.ko. A kernel module is
+                # a relocatable ELF object, not merely a filename suffix.
+                header=t.extractfile(m).read(20)
+                if is_module_object(header):
+                    kernel_modules.append(name)
+            assert not name.startswith(('usr/lib/modules/', 'lib/modules/', 'boot/Image-')), name
         def read(name):return contents[name]
+        verify_archive(policies, members, contents)
+        check_os_release(read('usr/lib/os-release').decode(), backend.DISTRIBUTION)
+        if 'usr/lib/reimuks/distribution.json' in contents:
+            assert json.loads(read('usr/lib/reimuks/distribution.json')) == identity(backend.DISTRIBUTION), 'Rootfs distribution differs'
+        else:
+            assert backend.DISTRIBUTION['id'] == DEFAULT, 'Legacy rootfs has no distribution identity'
         for name in members:
             assert not name.startswith('/') and '..' not in Path(name).parts,name
             assert name.split('/',1)[0] not in ('host-rootfs','packages','work','output'),name
@@ -103,30 +128,56 @@ def verify_rootfs(path,profile):
         for b in blocks:
             assert 'Status: install ok installed' in b,b[:120]
             assert '\nArchitecture: arm64' in b or '\nArchitecture: all' in b,b[:120]
-        required=['systemd-sysv','udev','kmod']+(['plasma-workspace','sddm'] if profile=='kde' else [])
+        specification = resolve_profile(profile, backend.DISTRIBUTION)
+        installed_versions = {}
+        for block in blocks:
+            fields = dict(line.split(': ', 1) for line in block.splitlines()
+                          if line and not line[0].isspace() and ': ' in line)
+            installed_versions[fields['Package']] = fields['Version']
+        check_package_versions(specification, installed_versions)
+        required=specification['required_packages']
         for pkg in required:
             assert any(b.startswith('Package: '+pkg+'\n') for b in blocks),pkg
-        assert module_hashes==meta['module_hashes']
-        assert read('usr/lib/reimuks/kernel-release').decode().strip()==meta['release']
-        assert read('usr/lib/reimuks/kernel-image.sha256').decode().strip()==meta['image_sha256']
-        target='graphical.target' if profile=='kde' else 'multi-user.target'
+        target=specification['target']
         assert members['etc/systemd/system/default.target'].linkname.endswith('/'+target)
-        if profile=='kde':
-            assert members['etc/systemd/system/display-manager.service'].linkname.endswith('/sddm.service')
+        if specification.get('display_manager'):
+            assert members['etc/systemd/system/display-manager.service'].linkname.endswith('/'+specification['display_manager']+'.service')
         assert not read('etc/machine-id').strip()
-        assert sum(n.endswith('.ko') for n in members)==len(meta['module_hashes'])
+        assert not kernel_modules, ('Kernel modules belong in a separate deployment bundle', kernel_modules)
         return {'entries':len(members),'packages':len(blocks),'bytes':path.stat().st_size,'sha256':digest(path)}
 
 
+def is_module_object(header):
+    return (len(header) >= 18 and header[:4] == b'\x7fELF' and
+            header[5] in (1, 2) and
+            int.from_bytes(header[16:18], 'little' if header[5] == 1 else 'big') == 1)
+
+
 def main():
-    output=BUILD/'artifacts'
-    result={'initramfs':verify_initramfs(output/'initramfs-arm64.cpio.lz4')}
-    for profile in ('server','kde'):
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--board', default=os.environ.get('REIMUKS_BOARD', 'w202ds'))
+    parser.add_argument('--distribution',default=os.environ.get('REIMUKS_DISTRIBUTION', DEFAULT))
+    parser.add_argument('--profile', choices=['server', 'kde', 'gnome'],
+                        help='Verify only this rootfs, independently of initramfs or other profiles')
+    args=parser.parse_args()
+    backend.select_board(args.board)
+    initramfs = None
+    if args.profile is None:
+        backend.select_distribution(DEFAULT)
+        initramfs=verify_initramfs(backend.artifact_directory()/'initramfs-arm64.cpio.lz4')
+    backend.select_distribution(args.distribution)
+    output=backend.artifact_directory()
+    result={'distribution':identity(backend.DISTRIBUTION)}
+    if initramfs is not None:
+        result['initramfs'] = initramfs
+    profiles = [args.profile] if args.profile else ['server', 'kde']
+    for profile in profiles:
         result[profile]=verify_rootfs(output/f'desktop-{profile}-arm64-rootfs.tar.gz',profile)
     (output/'verification.json').write_text(json.dumps(result,indent=2)+'\n')
-    (output/'SHA256SUMS').write_text(''.join(f'{v["sha256"]}  {name}\n' for name,v in [
-        ('initramfs-arm64.cpio.lz4',result['initramfs']),
-        ('desktop-server-arm64-rootfs.tar.gz',result['server']),('desktop-kde-arm64-rootfs.tar.gz',result['kde'])]))
+    entries=[(f'desktop-{profile}-arm64-rootfs.tar.gz',result[profile]) for profile in profiles]
+    if initramfs is not None and backend.DISTRIBUTION['id'] == DEFAULT:
+        entries.insert(0, ('initramfs-arm64.cpio.lz4',result['initramfs']))
+    (output/'SHA256SUMS').write_text(''.join(f'{v["sha256"]}  {name}\n' for name,v in entries))
     print(json.dumps(result,indent=2))
 
 

@@ -5,12 +5,46 @@
   "boot_builder": "boot/pocketjs4edk2_uefi/build-firmware.py",
   "profiles": [
     "desktop/server",
-    "desktop/kde"
+    "desktop/kde",
+    "desktop/gnome"
   ],
   "kernel_release_suffix": "-w202ds-",
+  "initramfs_early_modules": [
+    "w202_r6p0"
+  ],
   "placeholders": {
-    "desktop/gnome": "not implemented",
     "desktop/niri": "not implemented",
     "server": "no server kernel provided"
-  }
+  },
+  "userspace_manifest": "kernel/board-userspace.json",
+  "initramfs_exports": {
+    "bin/w202-usb-gadget": "usb-gadget"
+  },
+  "initramfs_policy_files": {
+    "etc/default/w202-usb-gadget": "rootfs/common/etc/default/w202-usb-gadget"
+  },
+  "kernel_builder": "kernel/scripts/build.py",
+  "module_requirements": {
+    "w202_hall.ko": [
+      "switch_code"
+    ]
+  },
+  "kernel_policy": {
+    "forbidden_configs": [
+      "CONFIG_W202DS_DIAG_RECOVERY"
+    ],
+    "forbidden_cmdline_prefixes": [
+      "w202ds_diag="
+    ],
+    "initramfs_forbidden_paths": [
+      "w202diag"
+    ],
+    "root_selection": [
+      "DT /chosen/pj4edk2,root-partuuid",
+      "cmdline root="
+    ]
+  },
+  "integration_builder": "build.py",
+  "kernel_exporter": "kernel/scripts/runtime-export.py",
+  "kernel_runtime": "kernel/output/runtime-{profile}"
 }

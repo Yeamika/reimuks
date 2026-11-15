@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "desktop": {
+    "root": {"password_env": "REIMUKS_ROOT_PASSWORD"},
+    "reimuks": {"password_env": "REIMUKS_USER_PASSWORD"}
+  }
+}

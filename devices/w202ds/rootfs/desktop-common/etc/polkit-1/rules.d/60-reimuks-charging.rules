@@ -1,0 +1,11 @@
+// Charging controls are available to the active local desktop session only.
+// USB role changes and all other privileged commands keep their own policy.
+polkit.addRule(function(action, subject) {
+    if (action.id !== "org.reimuks.power.control" || !subject.local || !subject.active) {
+        return;
+    }
+    var command = action.lookup("command_line");
+    if (/^\/usr\/libexec\/w202-power-control (charge-auto|charge-inhibit|fast-on|fast-off|mode-auto|mode-pps|mode-pd9v|mode-pd5v)$/.test(command || "")) {
+        return polkit.Result.YES;
+    }
+});

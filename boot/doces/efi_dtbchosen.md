@@ -73,7 +73,6 @@ W202DS 当前编码为 **20 个大端 u32，共 80 字节**。生产方与消费
 - `w202ds-boot/pocketjs4edk2_uefi/efi/LinuxBoot/EnterKernel.S`：通过 `x0` 交接 DTB。
 - `w202ds-linux/6.18.35/kernel/drivers/of/fdt.c`：内核读取 initrd 地址。
 - `reimuks/initramfs/init`：本轮新 initramfs 的 rootfs 选择、身份检查与切换逻辑。
-- `w202ds-linux/6.18.35/integration/kernel/initramfs/try-persistent-root.sh`：原板级 initramfs 的根选择参考。
 - `w202ds-linux/6.18.35/Devices/drm/source/pj4edk-boot-display/pj4edk-boot-display.c`：早期显示交接。
 - `w202ds-linux/6.18.35/Devices/drm/source/baseline/w202_boot_console.c`：DRM 阶段的启动控制台。
 

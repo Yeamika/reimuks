@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Keyboard orientation lock
+Name[zh_CN]=键盘方向锁定
+Exec=w202-rotation --watch
+TryExec=w202-rotation
+OnlyShowIn=KDE;
+NoDisplay=true

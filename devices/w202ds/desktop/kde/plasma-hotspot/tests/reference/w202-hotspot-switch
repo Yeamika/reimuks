@@ -1,0 +1,255 @@
+#!/usr/bin/python3
+"""Prepare and restore the Wi-Fi device around Plasma NM's native hotspot API."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+
+SERVICE = "org.freedesktop.NetworkManager"
+MANAGER_PATH = "/org/freedesktop/NetworkManager"
+MANAGER = SERVICE
+DEVICE = SERVICE + ".Device"
+WIRELESS = DEVICE + ".Wireless"
+ACTIVE = SERVICE + ".Connection.Active"
+SETTINGS = SERVICE + ".Settings"
+CONNECTION = SETTINGS + ".Connection"
+SETTINGS_PATH = MANAGER_PATH + "/Settings"
+PROPERTIES = "org.freedesktop.DBus.Properties"
+IFACE = "wlan0"
+RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/" + str(os.getuid())))
+STATE = RUNTIME / "w202-hotspot-switch.json"
+LOCK = RUNTIME / "w202-hotspot-switch.lock"
+
+
+class SwitchError(Exception):
+    pass
+
+
+class Network:
+    def __init__(self):
+        global Gio, GLib
+        from gi.repository import Gio, GLib
+        self.bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+
+    def call(self, path, interface, method, signature=None, values=()):
+        args = GLib.Variant(signature, values) if signature else None
+        return self.bus.call_sync(
+            SERVICE, path, interface, method, args, None,
+            Gio.DBusCallFlags.NONE, 3000, None
+        ).unpack()
+
+    def properties(self, path, interface):
+        return self.call(path, PROPERTIES, "GetAll", "(s)", (interface,))[0]
+
+    def manager(self):
+        return self.properties(MANAGER_PATH, MANAGER)
+
+    def device_path(self):
+        return self.call(MANAGER_PATH, MANAGER, "GetDeviceByIpIface", "(s)", (IFACE,))[0]
+
+    def device(self):
+        path = self.device_path()
+        props = self.properties(path, DEVICE)
+        props["path"] = path
+        props["mode"] = self.properties(path, WIRELESS).get("Mode", 0)
+        active = props.get("ActiveConnection", "/")
+        try:
+            props["active"] = self.properties(active, ACTIVE) if active != "/" else {}
+        except GLib.Error:
+            # Deactivated connection objects can disappear between the two reads.
+            props["active"] = {}
+        return props
+
+    def set_radio(self, enabled):
+        self.call(MANAGER_PATH, PROPERTIES, "Set", "(ssv)",
+                  (MANAGER, "WirelessEnabled", GLib.Variant("b", enabled)))
+
+    def set_autoconnect(self, enabled):
+        self.call(self.device_path(), PROPERTIES, "Set", "(ssv)",
+                  (DEVICE, "Autoconnect", GLib.Variant("b", enabled)))
+
+    def disconnect(self):
+        self.call(self.device_path(), DEVICE, "Disconnect")
+
+    def deactivate(self, active_path):
+        self.call(MANAGER_PATH, MANAGER, "DeactivateConnection", "(o)", (active_path,))
+
+
+def read_state():
+    if not STATE.exists():
+        return None
+    if STATE.is_symlink() or STATE.stat().st_uid != os.getuid():
+        raise SwitchError("Invalid hotspot restore state")
+    return json.loads(STATE.read_text())
+
+
+def save_state(state):
+    temp = STATE.with_suffix(".tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(state, f)
+    os.replace(temp, STATE)
+
+
+def prepare(network, timeout=15):
+    manager = network.manager()
+    if not manager.get("NetworkingEnabled"):
+        raise SwitchError("Networking is disabled")
+    dev = network.device()
+    if dev["mode"] == 3:
+        raise SwitchError("A hotspot is already active")
+    state = {
+        "radio_enabled": bool(manager["WirelessEnabled"]),
+        "previous_uuid": dev["active"].get("Uuid", "") if dev["mode"] == 2 else "",
+        "phase": "preparing",
+    }
+    # A previous incomplete attempt must not overwrite its original radio state.
+    old_state = read_state()
+    if old_state and old_state.get("phase") == "preparing":
+        state = old_state
+    save_state(state)
+    network.set_autoconnect(False)
+    if not manager["WirelessEnabled"]:
+        network.set_radio(True)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        manager = network.manager()
+        if not manager.get("WirelessEnabled"):
+            raise SwitchError("Wi-Fi was switched off")
+        dev = network.device()
+        if dev.get("Managed") and 30 <= dev["State"] <= 100:
+            # Enabling the radio can auto-connect a saved STA before the AP request.
+            if state["radio_enabled"] and not state["previous_uuid"] and dev["mode"] == 2:
+                state["previous_uuid"] = dev["active"].get("Uuid", "")
+                save_state(state)
+            return {"ok": True, "ready": True}
+        time.sleep(0.15)
+    raise SwitchError("Wi-Fi did not become ready")
+
+
+def verify(network, timeout=40):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not network.manager().get("WirelessEnabled"):
+            raise SwitchError("Wi-Fi was switched off")
+        dev = network.device()
+        if dev["State"] == 120 or dev["active"].get("State") == 4:
+            raise SwitchError("Hotspot activation failed")
+        if dev["mode"] == 3 and dev["State"] == 100 and dev["active"].get("State") == 2:
+            state = read_state()
+            if state:
+                state["phase"] = "active"
+                save_state(state)
+            return {"ok": True, "active": True}
+        time.sleep(0.2)
+    raise SwitchError("Hotspot activation timed out")
+
+
+def configured_access_points(network):
+    profiles = []
+    for path in network.call(SETTINGS_PATH, SETTINGS, "ListConnections")[0]:
+        current = network.call(path, CONNECTION, "GetSettings")[0]
+        connection = current.get("connection", {})
+        wireless = current.get("802-11-wireless", {})
+        if (connection.get("type") == "802-11-wireless" and
+                connection.get("interface-name") in (None, "", IFACE) and
+                wireless.get("mode") == "ap"):
+            profiles.append((path, connection.get("uuid", "")))
+    return profiles
+
+
+def ensure_profile(network):
+    # Connections are user configuration. Never create a profile or supply
+    # default SSIDs, credentials, band, channel, width, security or addresses.
+    profiles = configured_access_points(network)
+    if not profiles:
+        raise SwitchError("Create an AP connection in KDE network settings first")
+    active = network.device().get("active", {}).get("Uuid")
+    for profile in profiles:
+        if profile[1] == active:
+            return profile
+    if len(profiles) == 1:
+        return profiles[0]
+    raise SwitchError("Several AP connections are configured; activate the desired one in KDE network settings")
+
+
+def create(network):
+    profile, _ = ensure_profile(network)
+    active = network.call(MANAGER_PATH, MANAGER, "ActivateConnection", "(ooo)",
+                          (profile, network.device_path(), "/"))[0]
+    return {"ok": True, "active_path": active}
+
+
+def status(network):
+    manager = network.manager()
+    dev = network.device()
+    radio = bool(manager.get("WirelessEnabled"))
+    ap = radio and dev["mode"] == 3 and bool(dev.get("active"))
+    sta = (dev["mode"] == 2 and bool(dev.get("active"))) or dev.get("Autoconnect", True)
+    mode = "off" if not radio else "ap" if ap else "sta" if sta else "idle"
+    return {"ok": True, "radio": radio, "mode": mode,
+            "hardware_enabled": bool(manager.get("WirelessHardwareEnabled", True))}
+
+
+def idle(network, radio=None, timeout=15):
+    # Block automatic activation BEFORE disconnecting. Never restore STA on stop.
+    network.set_autoconnect(False)
+    dev = network.device()
+    if dev.get("active") or 40 <= dev["State"] <= 110:
+        network.disconnect()
+    deadline = time.monotonic() + timeout
+    while True:
+        dev = network.device()
+        if not dev.get("active") and dev["State"] not in range(40, 111):
+            break
+        if time.monotonic() >= deadline:
+            raise SwitchError("Wi-Fi did not disconnect")
+        time.sleep(0.15)
+    if radio is not None:
+        network.set_radio(radio)
+    STATE.unlink(missing_ok=True)
+    return status(network)
+
+
+def station(network):
+    idle(network, radio=True)
+    network.set_autoconnect(True)
+    return status(network)
+
+
+def restore(network, timeout=15, rollback=False):
+    # Failure and AP shutdown both end in idle, never silently reconnect STA.
+    return idle(network, timeout=timeout)
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in ("prepare", "create", "verify", "restore", "rollback", "status",
+                                                     "idle", "sta", "radio-on", "radio-off"):
+        raise SwitchError("Invalid hotspot operation")
+    if sys.argv[1] == "status":
+        return status(Network())
+    fd = os.open(LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise SwitchError("A hotspot operation is already running")
+        if sys.argv[1] in ("radio-on", "radio-off"):
+            return idle(Network(), radio=sys.argv[1] == "radio-on")
+        if sys.argv[1] == "sta":
+            return station(Network())
+        if sys.argv[1] == "rollback":
+            return restore(Network(), rollback=True)
+        return globals()[sys.argv[1]](Network())
+
+
+if __name__ == "__main__":
+    try:
+        result = main()
+    except Exception as exc:
+        result = {"ok": False, "error": str(exc)}
+    print(json.dumps(result, ensure_ascii=False), flush=True)

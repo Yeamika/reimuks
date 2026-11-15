@@ -1,0 +1,17 @@
+[Unit]
+Description=Debounced Hall lid switch for the desktop
+After=systemd-udevd.service
+Before=upower.service
+ConditionPathExists=/sys/devices/platform/soc/soc:hall_sensor
+
+[Service]
+Type=notify
+TimeoutStartSec=10
+ExecStartPre=/sbin/modprobe w202_hall
+ExecStartPre=/sbin/modprobe uinput
+ExecStart=/usr/libexec/w202-hall-input --source /sys/devices/platform/soc/soc:hall_sensor/active --switch-code 0 --active-delay-ms 2000 --name "REIMUKS Lid Switch"
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

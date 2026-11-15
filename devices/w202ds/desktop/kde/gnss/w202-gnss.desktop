@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=GNSS receiver
+Name[zh_CN]=GNSS 定位开关
+Comment=Start or stop the GNSS receiver
+Exec=/usr/libexec/w202-gnss-toggle
+Icon=mark-location
+Terminal=false
+Categories=Settings;HardwareSettings;

@@ -1,0 +1,25 @@
+#!/bin/sh
+# W202DS early hardware setup; transport implementation comes from the board HAL.
+set -eu
+log() {
+    if [ -w /dev/kmsg ]; then
+        printf '<6>reimuks-w202ds: %s\n' "$*" > /dev/kmsg
+    fi
+}
+
+if [ -x /bin/w202-usb-gadget ]; then
+    /bin/w202-usb-gadget start >/run/reimuks-usb-gadget.log 2>&1 &
+    echo $! >/run/reimuks-usb-gadget.pid
+fi
+
+# Select the stock voltage before root discovery, avoiding the driver's timeout.
+parameter=/sys/module/sprd_cpufreq_v2_driver/parameters/voltage_offset_uv
+if [ -e "$parameter" ]; then
+    if printf '0,0,0' > "$parameter"; then
+        log 'cpu dvfs stock voltage selected'
+    else
+        log 'cpu dvfs stock voltage write failed; kernel timeout remains'
+    fi
+else
+    log 'cpu dvfs voltage parameter unavailable; kernel timeout remains'
+fi

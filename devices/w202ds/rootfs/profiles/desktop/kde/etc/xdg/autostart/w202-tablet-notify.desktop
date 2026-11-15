@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Tablet mode notifications
+Exec=/usr/libexec/w202-tablet-notify
+OnlyShowIn=KDE;
+NoDisplay=true

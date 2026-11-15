@@ -1,0 +1,32 @@
+#!/usr/bin/python3
+"""Wayland Chrome launcher using standard graphics and video APIs."""
+import json
+import os
+from pathlib import Path
+import re
+import sys
+
+environment = dict(os.environ)
+policy = Path('/etc/reimuks/acceleration.json')
+settings = json.loads(policy.read_text()) if policy.exists() else {}
+driver = settings.get('va_driver')
+if driver:
+    if not isinstance(driver, str) or not re.fullmatch(r'[a-zA-Z0-9_]+', driver):
+        raise SystemExit('Invalid VA-API driver name')
+    environment.setdefault('LIBVA_DRIVER_NAME', driver)
+arguments = sys.argv[1:]
+vulkan = '--reimuks-vulkan' in arguments
+arguments = [arg for arg in arguments if arg != '--reimuks-vulkan']
+features = ['AcceleratedVideoDecodeLinuxGL']
+flags = ['--ozone-platform=wayland', '--use-gl=angle']
+if vulkan:
+    for name, value in settings.get('vulkan_environment', {}).items():
+        if not re.fullmatch(r'[A-Z][A-Z0-9_]*', name) or not isinstance(value, str) or any(c in value for c in '\0\r\n'):
+            raise SystemExit('Invalid Vulkan environment setting')
+        environment.setdefault(name, value)
+    features += ['Vulkan', 'DefaultANGLEVulkan', 'VulkanFromANGLE']
+    flags += ['--use-angle=vulkan']
+else:
+    flags += ['--use-angle=gles']
+flags += ['--enable-features='+','.join(features)]
+os.execve('/usr/bin/google-chrome-stable', ['google-chrome-stable', *flags, *arguments], environment)

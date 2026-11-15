@@ -1,0 +1,38 @@
+{
+  "cc": "build/boot-tools/bin/aarch64-linux-gnu-gcc",
+  "desktop_sysroot": "build/sdk/desktop/root",
+  "moc": "moc",
+  "hardware_producers": {
+    "gpu": {
+      "command_prefix": [
+        "python3"
+      ],
+      "arguments": [
+        "--cross-file",
+        "output/dependencies/panvk/arm64.ini"
+      ]
+    },
+    "modemmanager": {
+      "command_prefix": [
+        "python3"
+      ],
+      "arguments": [
+        "--cross-file",
+        "output/dependencies/modem/arm64.ini"
+      ]
+    },
+    "v4l2-vaapi": {
+      "command_prefix": [
+        "python3"
+      ],
+      "arguments": [
+        "--sdk",
+        "/path/to/target-sdk",
+        "--host-root",
+        "/path/to/build-host-root",
+        "--proot",
+        "/path/to/proot"
+      ]
+    }
+  }
+}

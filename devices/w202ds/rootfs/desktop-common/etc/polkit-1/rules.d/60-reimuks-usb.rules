@@ -1,0 +1,10 @@
+// Allow bounded USB settings from the active local desktop session.
+polkit.addRule(function(action, subject) {
+    if (action.id !== "org.reimuks.usb.control" || !subject.local || !subject.active) {
+        return;
+    }
+    var command = action.lookup("command_line");
+    if (/^\/usr\/libexec\/w202-usb-settings usb-(auto|device|host)-[01]-[123]$/.test(command || "")) {
+        return polkit.Result.YES;
+    }
+});

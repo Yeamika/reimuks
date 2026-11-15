@@ -1,3 +1,7 @@
 /build/
 __pycache__/
 *.pyc
+/devices/*/boot-inputs.local.json
+/config/accounts.local.json
+
+/devices/*/build.local.json

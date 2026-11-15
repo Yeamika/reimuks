@@ -1,0 +1,50 @@
+{
+  "profiles": [
+    "desktop/kde",
+    "desktop/gnome"
+  ],
+  "packages": [
+    "google-chrome-stable",
+    "code",
+    "btop",
+    "fastfetch",
+    "vim",
+    "lazygit"
+  ],
+  "acceleration_packages": [
+    "libegl1",
+    "libgles2",
+    "libgl1",
+    "libva2",
+    "libva-drm2",
+    "libva-wayland2",
+    "libvulkan1",
+    "mesa-vulkan-drivers",
+    "mesa-va-drivers",
+    "vainfo",
+    "vulkan-tools",
+    "ffmpeg"
+  ],
+  "repositories": [
+    {
+      "uri": "https://dl.google.com/linux/chrome/deb/",
+      "suite": "stable",
+      "components": [
+        "main"
+      ],
+      "keyring": "trixie/keys/google.asc",
+      "keyring_sha256": "688096f15650dbf7ef0affc5a8ff4ac975e48dca23f5a3fffac2f6bcc801bcc4",
+      "target_keyring": "/usr/share/keyrings/reimuks-google.asc"
+    },
+    {
+      "uri": "https://packages.microsoft.com/repos/code",
+      "suite": "stable",
+      "components": [
+        "main"
+      ],
+      "keyring": "trixie/keys/microsoft.asc",
+      "keyring_sha256": "2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6",
+      "target_keyring": "/usr/share/keyrings/reimuks-microsoft.asc"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+#!/usr/bin/python3
+"""W202DS hotspot scan drain: finish stale supplicant scans after AP activation."""
+import os
+import subprocess
+import sys
+import uuid
+
+IFACE = "wlan0"
+
+
+def drain(interface, action, connection_uuid):
+    if interface != IFACE or action != "up":
+        return False
+    try:
+        uuid.UUID(connection_uuid)
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+    def run(args):
+        result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, timeout=5, env={**os.environ, "LC_ALL": "C.UTF-8"})
+        if result.returncode:
+            raise RuntimeError("Could not finish the hotspot scan transition")
+        return result.stdout.strip()
+
+    # An event can arrive after the user has already switched back to STA.
+    active = run(["/usr/bin/nmcli", "-g", "GENERAL.CON-UUID", "device", "show", IFACE])
+    mode = run(["/usr/bin/nmcli", "-g", "802-11-wireless.mode", "connection", "show",
+                "uuid", connection_uuid])
+    if active != connection_uuid or mode != "ap":
+        return False
+    # wpa_supplicant 2.10 can carry a NORMAL_SCAN_REQ into the active AP and
+    # retry the driver's -EBUSY every second. SCAN TYPE=ONLY replaces that
+    # timeout with a MANUAL_SCAN_REQ, which does not retry on -EBUSY. The
+    # W202DS driver's existing beaconing-AP guard prevents an off-channel scan.
+    # Do this once, after AP startup; leave HT/ACS scans and STA scans intact.
+    if run(["/usr/sbin/wpa_cli", "-i", IFACE, "scan", "TYPE=ONLY"]) != "OK":
+        raise RuntimeError("The hotspot scan transition was rejected")
+    return True
+
+
+if __name__ == "__main__":
+    try:
+        if len(sys.argv) == 3 and drain(sys.argv[1], sys.argv[2], os.environ.get("CONNECTION_UUID", "")):
+            print("W202DS hotspot scan drain completed")
+    except Exception as error:
+        print(str(error), file=sys.stderr)
+        raise SystemExit(1)

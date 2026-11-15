@@ -1,0 +1,2 @@
+# Panfrost's standard per-client DRM engine-time counters for desktop monitors.
+ACTION=="add|bind", SUBSYSTEM=="platform", KERNEL=="23140000.gpu", DRIVER=="panfrost", ATTR{profiling}="1"

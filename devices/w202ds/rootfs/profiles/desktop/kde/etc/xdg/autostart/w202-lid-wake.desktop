@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Lid display wake
+Exec=/usr/libexec/w202-lid-wake
+OnlyShowIn=KDE;
+NoDisplay=true
+X-KDE-autostart-phase=2

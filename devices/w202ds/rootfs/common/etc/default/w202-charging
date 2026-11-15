@@ -1,0 +1,2 @@
+# Let the guarded board driver negotiate PPS or fall back to ordinary USB.
+CHARGE_BEHAVIOUR=auto

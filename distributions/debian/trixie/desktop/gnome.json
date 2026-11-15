@@ -1,0 +1,19 @@
+{
+  "packages": [
+    "gnome",
+    "fonts-noto-cjk"
+  ],
+  "required_packages": [
+    "gnome",
+    "gnome-shell",
+    "gnome-session",
+    "gnome-settings-daemon",
+    "gnome-control-center",
+    "xdg-desktop-portal-gnome",
+    "fonts-noto-cjk",
+    "gdm3"
+  ],
+  "install_recommends": true,
+  "display_manager": "gdm3",
+  "display_protocol": "wayland"
+}

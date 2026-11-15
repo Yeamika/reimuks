@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+systemctl --quiet is-active multi-user.target
+display=/sys/devices/platform/w202-r6p0-lk-dsi
+test "$(cat "$display/display_enable")" = 1
+test "$(cat "$display/display_ready")" = 1
+# Only errors and more severe messages reach the login console.
+# All priorities remain available in the kernel ring buffer and journal.
+dmesg -n 4
+if test "$(cat "$display/boot_console")" = 1; then
+    printf '%s\n' 0 > "$display/boot_console"
+fi
+test "$(cat "$display/boot_console")" = 0
+printf '\033[H\033[2J\033[3J' > /dev/tty1
+# Restart asynchronously: login setup must not hold up the display policy.
+systemctl --no-block restart getty@tty1.service

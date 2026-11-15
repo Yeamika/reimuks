@@ -1,0 +1,9 @@
+#!/bin/sh
+# Readiness depends on the listening socket, not a diagnostic kernel device.
+set -eu
+n=0
+until ss -H -ltn | grep -Eq ':9002[[:space:]]'; do
+    test "$n" -lt 100 || exit 1
+    sleep 0.1
+    n=$((n + 1))
+done
