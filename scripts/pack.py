@@ -182,6 +182,12 @@ def rootfs(profile, user_overlay=None):
     import subprocess
     backend.check_rootfs(profile)
     source_root = backend.profile_directory(profile)/'rootfs'
+    status = source_root/'var/lib/dpkg/status'
+    installed = {line.removeprefix('Package: ') for line in status.read_text().splitlines()
+                 if line.startswith('Package: ')} if status.is_file() else set()
+    applications = set(backend.DISTRIBUTION.get('additional_packages', {}).get('packages', []))
+    if installed & applications:
+        raise SystemExit('Optional applications remain in the base tree; refresh fetch selection and configure before packing')
     work = backend.profile_directory(profile)/'work'
     audit = work/'dpkg-audit.txt'
     if not (work/'configured').exists() or not audit.exists() or audit.stat().st_size:
@@ -248,7 +254,8 @@ tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
     partial=dest.with_suffix(dest.suffix+'.part')
     partial.replace(dest)
     shutil.copyfile(work/'packages.tsv',output/f'{profile}-packages.tsv')
-    debs={p.name:digest(p) for p in (backend.distribution_build()/f'apt-{profile}'/'archives').glob('*.deb')}
+    receipt = backend.distribution_build()/f'apt-{profile}'/'fetch-complete.json'
+    debs = json.loads(receipt.read_text())['archives'] if receipt.exists() else {}
     login = {}
     for line in (root/'etc/shadow').read_text().splitlines():
         fields = line.split(':')

@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Build an offline application bundle, separate from the base rootfs."""
+import argparse
+import io
+import json
+import os
+from pathlib import Path
+import tarfile
+import build
+from distributions import identity, profile_name, additional_repositories, repository_key
+from user_overlay import archive
+from apt_selection import selected_archives
+
+
+def applications(distribution, profile):
+    config = distribution.get('additional_packages', {})
+    if profile_name(profile) not in config.get('profiles', []):
+        raise ValueError('No application group for this profile')
+    return config['packages']
+
+
+
+
+def fetch(profile):
+    state = build.apt_state('apt-apps-'+profile, build.DISTRIBUTION['architecture'], profile=profile, include_apps=True)
+    build.apt(state, 'update')
+    build.apt(state, '--download-only', '--no-install-recommends', '-y', 'install', *applications(build.DISTRIBUTION,profile))
+    selected = selected_archives(state, applications(build.DISTRIBUTION,profile))
+    build.write(state/'fetch-complete.json', json.dumps({'distribution':identity(build.DISTRIBUTION),
+        'archives':{p.name:build.digest(p) for p in selected}},indent=2)+'\n')
+    return state
+
+
+INSTALL = '''#!/bin/sh
+set -eu
+test "$(id -u)" = 0 || { echo 'Root is required' >&2; exit 1; }
+cd "$(dirname "$0")"
+sha256sum -c SHA256SUMS
+# The bundle contains the dependency closure; never fetch missing dependencies.
+apt-get --no-download --no-install-recommends -y install "$PWD"/packages/*.deb
+cp -a rootfs/. /
+python3 configure.py
+'''
+CONFIGURE = '''from pathlib import Path
+entry=Path('/usr/share/applications/google-chrome.desktop')
+if entry.is_file():
+    text=entry.read_text()
+    for binary in ('/usr/bin/google-chrome-stable','/usr/bin/google-chrome'):
+        text=text.replace('Exec='+binary,'Exec=/usr/bin/reimuks-chrome')
+    target=Path('/usr/local/share/applications/google-chrome.desktop')
+    target.parent.mkdir(parents=True,exist_ok=True)
+    target.write_text(text)
+'''
+
+
+def pack(profile, state, output):
+    requested=applications(build.DISTRIBUTION,profile)
+    selected=selected_archives(state, requested)
+    receipt=json.loads((state/'fetch-complete.json').read_text())
+    if receipt['distribution'] != identity(build.DISTRIBUTION):
+        raise ValueError('Package cache belongs to a different distribution configuration')
+    hashes={p.name:build.digest(p) for p in selected}
+    if any(receipt['archives'].get(n) != h for n,h in hashes.items()):
+        raise ValueError('Application package cache is not authenticated by its fetch receipt')
+    manifest={'schema':1,'distribution':identity(build.DISTRIBUTION),'applications':requested,
+              'archives':hashes,'board_drivers_included':False}
+    def emit(result):
+        def data(name, content, mode=0o644):
+            info=tarfile.TarInfo(name);info.size=len(content);info.mode=mode;result.addfile(info,io.BytesIO(content))
+        data('manifest.json',(json.dumps(manifest,indent=2)+'\n').encode())
+        data('install.sh',INSTALL.encode(),0o755)
+        data('configure.py',CONFIGURE.encode())
+        sums=[]
+        for path in selected:
+            info=tarfile.TarInfo('packages/'+path.name);info.size=path.stat().st_size;info.mode=0o644
+            with path.open('rb') as stream:result.addfile(info,stream)
+            sums.append(hashes[path.name]+'  packages/'+path.name+'\n')
+        source=Path(__file__).resolve().parents[1]/'distributions'/build.DISTRIBUTION['id']/'rootfs'
+        for path in sorted(source.rglob('*')):
+            info=result.gettarinfo(str(path),'rootfs/'+str(path.relative_to(source)))
+            info.uid=info.gid=0;info.uname=info.gname='';info.mtime=0
+            info.mode &= ~0o022
+            if info.isfile():
+                with path.open('rb') as stream:result.addfile(info,stream)
+            else:result.addfile(info)
+        sources=[]
+        for repository in additional_repositories(build.DISTRIBUTION,profile,include_apps=True):
+            data('rootfs'+repository['target_keyring'], repository_key(build.DISTRIBUTION,repository).read_bytes())
+            sources.append(f"deb [arch={build.DISTRIBUTION['architecture']} signed-by={repository['target_keyring']}] "
+                           f"{repository['uri']} {repository['suite']} {' '.join(repository['components'])}\n")
+        if sources:
+            data('rootfs/etc/apt/sources.list.d/reimuks-apps.list',''.join(sources).encode())
+        data('SHA256SUMS',''.join(sums).encode())
+    archive(output,emit)
+    return manifest
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action',choices=['fetch','pack'])
+    parser.add_argument('--profile',choices=['kde','gnome'],default='kde')
+    parser.add_argument('--distribution',default=build.DEFAULT)
+    parser.add_argument('--cache',type=Path,help='Authenticated cache; defaults to the application cache')
+    args=parser.parse_args()
+    build.select_distribution(args.distribution)
+    if args.action=='fetch':
+        fetch(args.profile)
+    else:
+        cache=args.cache or build.distribution_build()/('apt-apps-'+args.profile)
+        output=build.artifact_directory()/'apps-arm64.tar.gz'
+        print(json.dumps(pack(args.profile,cache,output),indent=2))
+
+
+if __name__=='__main__':
+    os.umask(0o022)
+    main()

@@ -151,6 +151,8 @@ def verify_rootfs(path,profile):
             fields = dict(line.split(': ', 1) for line in block.splitlines()
                           if line and not line[0].isspace() and ': ' in line)
             installed_versions[fields['Package']] = fields['Version']
+        optional = set(backend.DISTRIBUTION.get('additional_packages', {}).get('packages', []))
+        assert not optional.intersection(installed_versions), ('Optional applications in base rootfs', sorted(optional.intersection(installed_versions)))
         check_package_versions(specification, installed_versions)
         required=specification['required_packages']
         for pkg in required:

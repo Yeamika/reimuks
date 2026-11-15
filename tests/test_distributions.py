@@ -67,9 +67,10 @@ class DistributionTest(unittest.TestCase):
         apps = {'google-chrome-stable', 'code', 'btop', 'fastfetch', 'vim', 'lazygit'}
         for profile in ('kde', 'gnome'):
             spec = registry.resolve_profile(profile, self.distro)
-            self.assertTrue(apps <= set(spec['packages']))
-            self.assertTrue(apps <= set(spec['required_packages']))
-            sources = registry.sources_list(self.distro, target=True, profile=profile)
+            self.assertFalse(apps & set(spec['packages']))
+            self.assertFalse(apps & set(spec['required_packages']))
+            self.assertNotIn('dl.google.com', registry.sources_list(self.distro, target=True, profile=profile))
+            sources = registry.sources_list(self.distro, target=True, profile=profile, include_apps=True)
             self.assertIn('signed-by=/usr/share/keyrings/reimuks-google.asc', sources)
             self.assertIn('https://packages.microsoft.com/repos/code', sources)
             self.assertIn('libvulkan1', spec['packages'])
@@ -97,7 +98,8 @@ class DistributionTest(unittest.TestCase):
                                       ('server', '--no-install-recommends')]:
                 with self.subTest(profile=profile), \
                         patch.object(build, 'apt_state', return_value=state), \
-                        patch.object(build, 'apt') as apt:
+                        patch.object(build, 'apt') as apt, \
+                        patch('apt_selection.selected_archives', return_value=[]):
                     build.fetch(profile)
                     install = apt.call_args_list[-1].args
                     self.assertIn(expected, install)

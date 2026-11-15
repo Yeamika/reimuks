@@ -68,10 +68,25 @@ class FetchIntegrityTest(unittest.TestCase):
         self.package.write_bytes(b'corrupt')
         self.rejected('changed or is missing')
 
-    def test_unrecorded_archive(self):
+    def test_offline_reselection_uses_only_authenticated_cached_inputs(self):
+        self.save()
+        with patch.object(build,'apt_state',return_value=self.state), patch.object(build,'apt') as network, \
+                patch('apt_selection.selected_archives',return_value=[self.package]):
+            build.fetch('kde',offline=True)
+            network.assert_not_called()
+            self.package.write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError,'unverified or changed'):
+                build.fetch('kde',offline=True)
+            network.assert_not_called()
+
+    def test_unselected_cached_archives_are_not_assembled(self):
         self.save()
         (self.state/'archives/unexpected.deb').touch()
-        self.rejected('cache changed')
+        with patch.object(build.subprocess, 'check_output', return_value='Package: example\nVersion: 1\nArchitecture: arm64\n') as query:
+            selected = build.cached_packages(self.state)
+        self.assertEqual(set(selected), {('example','arm64')})
+        self.assertEqual(query.call_count, 1)
+        self.assertIn(str(self.package), query.call_args.args[0])
 
     def test_package_selection_refresh_keeps_cache_and_invalidates_receipt(self):
         self.save()

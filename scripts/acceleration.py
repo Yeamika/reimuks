@@ -8,11 +8,14 @@ def install(root, profile, distribution):
     extra = distribution.get('additional_packages', {})
     if profile_name(profile) not in extra.get('profiles', []):
         return
+    desktop = root/'usr/share/applications/google-chrome.desktop'
+    if not desktop.is_file():
+        for relative in ('usr/bin/reimuks-chrome', 'etc/skel/.local/share/applications/google-chrome.desktop'):
+            (root/relative).unlink(missing_ok=True)
+        return
     source = Path(__file__).resolve().parents[1]/'distributions'/distribution['id']/'rootfs'
     shutil.copytree(source, root, dirs_exist_ok=True, symlinks=True)
     desktop = root/'usr/share/applications/google-chrome.desktop'
-    if not desktop.is_file():
-        raise ValueError('Missing installed Google Chrome desktop entry')
     text = desktop.read_text()
     lines = []
     for line in text.splitlines():

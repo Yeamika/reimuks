@@ -24,8 +24,9 @@ class OfflineConfigure(unittest.TestCase):
             (root/'var/lib/dpkg').mkdir(parents=True);work.mkdir()
             (work/'fakeroot.state').touch()
             states=['installed','unpacked','half-configured','half-installed']
-            (root/'var/lib/dpkg/status').write_text('\n\n'.join('Package: pkg%d\nVersion: 1\nStatus: install ok %s'%(i,status) for i,status in enumerate(states)))
+            (root/'var/lib/dpkg/status').write_text('\n\n'.join('Package: pkg%d\nVersion: 1\nStatus: install ok %s'%(i,status) for i,status in enumerate(states))+'\n\nPackage: old-app\nVersion: 1\nStatus: install ok installed\n')
             candidates={('pkg%d'%i,'arm64'):('1',base/('pkg%d.deb'%i)) for i in range(len(states))}
             with patch.object(build,'load_accounts'), patch.object(build,'check_rootfs'), patch.object(build,'profile_directory',return_value=tree), patch.object(build,'distribution_build',return_value=base), patch.object(build,'cached_packages',return_value=candidates), patch.object(build,'proot'), patch.object(build,'apply_accounts'):
                 build.configure('server')
             self.assertEqual((work/'unpack-list').read_text(),'pkg3.deb\n')
+            self.assertEqual((work/'purge-list').read_text(), 'old-app\n')

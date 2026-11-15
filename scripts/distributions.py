@@ -116,27 +116,28 @@ def resolve_profile(name, distribution, repo=REPO, seen=()):
         result[key] = list(dict.fromkeys(parent.get(key, [])+mapping.get(key, [])))
     extra = distribution.get('additional_packages', {})
     if name in extra.get('profiles', []):
-        additions = extra.get('packages', []) + extra.get('acceleration_packages', [])
+        # Applications are an optional offline bundle; API libraries belong to the desktop.
+        additions = extra.get('acceleration_packages', [])
         for key in ('packages', 'required_packages'):
             result[key] = list(dict.fromkeys(result[key] + additions))
     return result
 
 
-def additional_repositories(distribution, profile):
+def additional_repositories(distribution, profile, include_apps=False):
     extra = distribution.get('additional_packages', {})
-    return extra.get('repositories', []) if profile and profile_name(profile) in extra.get('profiles', []) else []
+    return extra.get('repositories', []) if include_apps and profile and profile_name(profile) in extra.get('profiles', []) else []
 
 
 def repository_key(distribution, source, repo=REPO):
     return repo/'distributions'/Path(distribution['id']).parent/source['keyring']
 
 
-def sources_list(distribution, target=False, keyring=None, profile=None):
+def sources_list(distribution, target=False, keyring=None, profile=None, include_apps=False):
     options = f' [signed-by={keyring}]' if keyring else ''
     components = ' '.join(distribution['components'])
     text = ''.join(f'deb{options} {source["uri"]} {source["suite"]} {components}\n'
                    for source in distribution['target_repositories' if target else 'build_repositories'])
-    for source in additional_repositories(distribution, profile):
+    for source in additional_repositories(distribution, profile, include_apps):
         key = source['target_keyring'] if target else repository_key(distribution, source)
         text += (f'deb [arch={distribution["architecture"]} signed-by={key}] '
                  f'{source["uri"]} {source["suite"]} {" ".join(source["components"])}\n')

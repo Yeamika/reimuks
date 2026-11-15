@@ -124,6 +124,8 @@ python3 scripts/verify.py
 
 `assemble` 和内核导入拒绝覆盖已有目录，防止把失败的旧状态误当作干净构建。配置日志必须成功，`dpkg --audit` 必须为空，才能打包 rootfs。构建失败时保留日志与现场，不将仅解包的目录标为完成。
 
+可选用户配置与软件包组统一从 [overlay/](overlay/README.md) 进入。私有文件可放在被忽略的 `overlay/user/files/`。
+
 ## 启动交接
 
 initramfs 使用 LinuxBoot 所需的 **legacy LZ4（魔数 `0x184c2102`）+ newc CPIO**，不是 gzip 或现代 LZ4 frame。REIMUKS 使用标准 `/init` 入口，不包含 `/w202diag` 诊断别名；内核导入会拒绝启用 `W202DS_DIAG_RECOVERY` 或强制 `rdinit=/w202diag` 的旧诊断配置。W202DS 应使用当前 Linux 工程的 `desktop` profile，不能复用旧 `debug` Image。
@@ -180,7 +182,7 @@ python3 scripts/user_overlay.py merge \
 
 每次 rootfs 打包都会重建固定的 `work/package-rootfs` 暂存目录，从配置完成的包树复制，再安装当前板级文件；不把板级文件或 overlay 写回原树。需要额外暂存空间，支持 reflink 的文件系统会复用数据块。旧版曾原地打包的树必须移除 rootfs/work 后，从保留的 APT 缓存重新 assemble、configure；不能仅补一个标记文件继续打包。公开模板移除组/其他用户写权限，保留包目录已有权限与归属；目标命令固定 HOME、隔离 XDG 环境，构建使用 umask 022。
 
-管理账号也需部署者配置：同一命令增加 `--user root` 可设置目标 root 密码。初版不为 `reimuks` 自动授予 sudo 权限。
+基础包不为 `reimuks` 自动授予 sudo 权限。
 
 构建工具固定使用 [PRoot v5.5.0](https://github.com/proot-me/proot/releases/tag/v5.5.0) 的上游静态二进制，并校验发布资产的 SHA-256；ARM64 用户态模拟器及包元数据来自 Debian 的签名仓库。
 
@@ -250,3 +252,5 @@ Debian trixie 的 KWin、GNOME Session 仍硬依赖 xwayland，SDDM 硬依赖 X 
 rootfs、内核运行包和 ESP 分别构建、分别校验；rootfs 不包含内核或模块。桌面硬件控件、左侧面板初始布局和板级服务均通过构建流程安装，手电筒控件的显示仍取决于硬件接口是否可用。构建测试通过不等于基带注册、桌面交互或休眠已完成设备验收。
 
 跨主机重建须使用相同 Git 提交及子模块、工具链、APT 包版本、源码锁定清单和配置。先比较各文件的长度与 SHA-256，再比较包版本和归档内容；含时间戳、账户初始化状态及设备私有输入的 rootfs 压缩包不能仅凭外层哈希判断代码差异。私有配置和设备固件不提交到仓库。
+
+附加应用不默认加入基础 rootfs；通过 [overlay/apps](overlay/apps/README.md) 单独构建和安装。应用软件源与 Chrome 启动策略随附加包提供，桌面基础层仍保留通用加速 API。APT 缓存可保留其他软件组的包，但 assemble 只安装当前 fetch 清单选定且已校验的文件。

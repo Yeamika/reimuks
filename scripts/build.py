@@ -95,7 +95,7 @@ def digest(path):
         return hashlib.file_digest(f, 'sha256').hexdigest()
 
 
-def apt_state(name, arch):
+def apt_state(name, arch, profile=None, include_apps=False):
     # Host tools use the fixed bootstrap distro, independently of the target.
     host = name == 'apt-host'
     distribution = load_distribution(DEFAULT) if host else DISTRIBUTION
@@ -106,7 +106,7 @@ def apt_state(name, arch):
     key = TOOLS / 'usr/share/keyrings/debian-archive-keyring.gpg'
     if not host:
         bind_distribution(state, refresh_cache=True)
-    write(state / 'sources.list', sources_list(distribution, keyring=key, profile=name.removeprefix('apt-')))
+    write(state / 'sources.list', sources_list(distribution, keyring=key, profile=profile or name.removeprefix('apt-'), include_apps=include_apps))
     config = f'''Dir::State::status "{state}/status";
 Dir::State::lists "{state}/lists";
 Dir::Cache::archives "{state}/archives";
@@ -181,11 +181,15 @@ def prepare_tools():
     binary.chmod(0o755)
 
 
-def fetch(profile):
+def fetch(profile, offline=False):
     state = apt_state(f'apt-{profile}', DISTRIBUTION['architecture'])
     receipt = state/'fetch-complete.json'
-    receipt.unlink(missing_ok=True)
-    apt(state, 'update')
+    previous = json.loads(receipt.read_text()) if offline and receipt.exists() else None
+    if offline and (previous is None or previous['distribution'] != identity(DISTRIBUTION)):
+        raise ValueError('Offline selection requires an authenticated cache for this distribution')
+    if not offline:
+        receipt.unlink(missing_ok=True)
+        apt(state, 'update')
     specification = resolve_profile(profile, DISTRIBUTION)
     versions = {}
     for package in specification.get('minimum_package_versions', {}):
@@ -196,18 +200,32 @@ def fetch(profile):
             if line.strip().startswith('Candidate:'):
                 versions[package] = line.split(':', 1)[1].strip()
     check_package_versions(specification, versions)
-    apt(state, '--download-only', '--install-recommends' if specification['install_recommends'] else '--no-install-recommends', '-y', 'install',
-        '?essential', *packages(profile))
+    if not offline:
+        apt(state, '--download-only', '--install-recommends' if specification['install_recommends'] else '--no-install-recommends', '-y', 'install',
+            '?essential', *packages(profile))
+    from apt_selection import selected_archives
+    selected = selected_archives(state, ['?essential', *packages(profile)],
+                                 specification['install_recommends'], DISTRIBUTION['architecture'])
+    if offline and any(previous['archives'].get(p.name) != digest(p) for p in selected):
+        raise ValueError('Offline selection includes an unverified or changed archive')
     write(receipt, json.dumps({
         'distribution': identity(DISTRIBUTION), 'profile': specification,
-        'archives': {p.name: digest(p) for p in sorted((state/'archives').glob('*.deb'))}
+        'archives': {p.name: digest(p) for p in selected}
     }, indent=2)+'\n')
     return state
 
 
 def cached_packages(state):
     candidates = {}
-    for archive in sorted((state / 'archives').glob('*.deb')):
+    receipt = state/'fetch-complete.json'
+    if receipt.exists():
+        names = json.loads(receipt.read_text())['archives']
+        if any(Path(n).name != n for n in names):
+            raise ValueError('Unsafe package receipt path')
+        archives = [state/'archives'/n for n in sorted(names)]
+    else:
+        archives = sorted((state/'archives').glob('*.deb'))
+    for archive in archives:
         package, version, architecture = subprocess.check_output(
             ['dpkg-deb', '-f', str(archive), 'Package', 'Version', 'Architecture'], text=True).splitlines()
         # Multiple fields are printed with labels by dpkg-deb.
@@ -233,8 +251,8 @@ def assemble(profile, state):
         archive = state/'archives'/name
         if Path(name).name != name or not archive.is_file() or digest(archive) != expected:
             raise SystemExit('Downloaded package changed or is missing: '+name+'; run fetch again.')
-    if set(downloaded['archives']) != {p.name for p in (state/'archives').glob('*.deb')}:
-        raise SystemExit('Package cache changed; run fetch again before assemble.')
+    # Unselected cached archives may belong to another optional package group.
+    # Only the authenticated selection is ever assembled.
     root = profile_directory(profile) / 'rootfs'
     if root.exists():
         raise SystemExit(f'Refusing to overwrite {root}; resume via configure or use a fresh build directory.')
@@ -319,10 +337,19 @@ def configure(profile, accounts=None):
     root = profile_directory(profile) / 'rootfs'
     state = distribution_build() / f'apt-{profile}'
     target = resolve_profile(profile, DISTRIBUTION)['target']
+    write(root/'usr/sbin/policy-rc.d', '#!/bin/sh\nexit 101\n', 0o755)
+    write(root/'etc/apt/sources.list', sources_list(DISTRIBUTION, target=True, profile=profile))
+    for repository in DISTRIBUTION.get('additional_packages', {}).get('repositories', []):
+        (root/repository['target_keyring'].lstrip('/')).unlink(missing_ok=True)
     script = '''#!/bin/sh
 set -eu
 umask 022
 export DEBIAN_FRONTEND=noninteractive LC_ALL=C
+# Remove obsolete selections through dpkg so package-owned files and maintainer
+# cleanup remain consistent with the new authenticated package set.
+set --
+while IFS= read -r package; do set -- "$@" "$package"; done < /work/purge-list
+if [ "$#" -gt 0 ]; then dpkg --purge "$@"; fi
 # The initial extraction provides the programs needed by package preinst scripts.
 # Re-unpack under target fakeroot so archive ownership and postinst chown survive.
 set --
@@ -344,15 +371,20 @@ dpkg-query -W -f='${Package}\\t${Version}\\t${Architecture}\\t${Status}\\n' > /w
 '''.replace('TARGET', target)
     work = profile_directory(profile) / 'work'
     ready = {}
+    known = set()
     saved = work / 'fakeroot.state'
     if saved.exists():
         for block in (root / 'var/lib/dpkg/status').read_text().split('\n\n'):
             fields = dict(line.split(': ', 1) for line in block.splitlines() if ': ' in line and not line.startswith(' '))
+            if 'Package' in fields:
+                known.add(fields['Package'])
             if fields.get('Status') in ('install ok installed', 'install ok unpacked',
                                          'install ok half-configured', 'install ok triggers-awaited',
                                          'install ok triggers-pending'):
                 ready[fields['Package']] = fields.get('Version')
     candidates = cached_packages(state)
+    requested = {package for package, _ in candidates}
+    write(work/'purge-list', ''.join(name+'\n' for name in sorted(known-requested)))
     pending = [archive.name for (package, _), (version, archive) in sorted(candidates.items())
                if ready.get(package) != version]
     write(work / 'unpack-list', ''.join(p+'\n' for p in pending))
@@ -372,12 +404,15 @@ def main():
     os.umask(0o022)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['tools', 'fetch', 'assemble', 'configure', 'accounts', 'password'])
+    parser.add_argument('--offline', action='store_true', help='fetch only; select from the existing authenticated cache without network access')
     parser.add_argument('--profile', choices=['server', 'kde', 'gnome'], default='server')
     parser.add_argument('--board', default=os.environ.get('REIMUKS_BOARD', 'w202ds'))
     parser.add_argument('--distribution', default=os.environ.get('REIMUKS_DISTRIBUTION', DEFAULT))
     parser.add_argument('--user', choices=['root', 'reimuks'], default='reimuks', help='Account for the password action')
     parser.add_argument('--accounts', type=Path, help='Desktop account configuration; defaults to config/accounts.local.json when present')
     args = parser.parse_args()
+    if args.offline and args.action != 'fetch':
+        parser.error('--offline applies only to fetch')
     if args.accounts is not None and args.action not in ('configure', 'accounts'):
         parser.error('--accounts applies only to configure and accounts')
     select_board(args.board)
@@ -386,7 +421,7 @@ def main():
     if args.action == 'tools':
         prepare_tools()
     elif args.action == 'fetch':
-        fetch(args.profile)
+        fetch(args.profile, offline=args.offline)
     elif args.action == 'assemble':
         assemble(args.profile, distribution_build() / f'apt-{args.profile}')
     elif args.action == 'configure':
