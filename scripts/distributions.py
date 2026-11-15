@@ -37,6 +37,21 @@ def load_distribution(name=DEFAULT, repo=REPO):
                 raise ValueError('Invalid repository URI or suite')
     # Expand references before computing identity: a layout-only split must not
     # invalidate caches, while edits to any referenced package list must do so.
+    common = data.get('desktop_common', {})
+    if isinstance(common, str):
+        relative = Path(common)
+        base = registry[name].parent.resolve()
+        path = (base/relative).resolve()
+        if relative.is_absolute() or '..' in relative.parts or not path.is_relative_to(base):
+            raise ValueError('Invalid desktop common mapping')
+        common = json.loads(path.read_text())
+    if not isinstance(common, dict) or any(
+            not isinstance(common.get(key, []), list) or
+            not all(isinstance(v, str) for v in common.get(key, []))
+            for key in ('packages', 'required_packages')):
+        raise ValueError('Invalid desktop common packages')
+    if common:
+        data['desktop_common'] = common
     for profile, mapping in data.get('profiles', {}).items():
         if isinstance(mapping, str):
             relative = Path(mapping)
@@ -114,6 +129,8 @@ def resolve_profile(name, distribution, repo=REPO, seen=()):
     result.setdefault('install_recommends', distribution.get('install_recommends', False))
     for key in ('packages', 'required_packages'):
         result[key] = list(dict.fromkeys(parent.get(key, [])+mapping.get(key, [])))
+        if name in ('desktop/kde', 'desktop/gnome'):
+            result[key] = list(dict.fromkeys(result[key] + distribution.get('desktop_common', {}).get(key, [])))
     extra = distribution.get('additional_packages', {})
     if name in extra.get('profiles', []):
         # Applications are an optional offline bundle; API libraries belong to the desktop.

@@ -1,10 +1,7 @@
 {
   "packages": [
     "kde-standard",
-    "pkexec",
     "krecorder",
-    "pipewire-audio",
-    "iio-sensor-proxy",
     "maliit-keyboard"
   ],
   "required_packages": [
@@ -12,7 +9,6 @@
     "plasma-workspace",
     "kwin-wayland",
     "sddm",
-    "pkexec",
     "plasma-pa",
     "qtwayland5",
     "fonts-noto-cjk",

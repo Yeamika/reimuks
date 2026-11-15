@@ -1,0 +1,31 @@
+{
+  "packages": [
+    "pkexec",
+    "pipewire-audio",
+    "iio-sensor-proxy",
+    "network-manager",
+    "modemmanager",
+    "upower",
+    "libinput10",
+    "libegl1",
+    "libgles2",
+    "libgl1",
+    "libva2",
+    "libva-drm2",
+    "libva-wayland2",
+    "libvulkan1",
+    "mesa-vulkan-drivers",
+    "mesa-va-drivers",
+    "vainfo",
+    "vulkan-tools",
+    "ffmpeg"
+  ],
+  "required_packages": [
+    "pkexec",
+    "pipewire-audio",
+    "iio-sensor-proxy",
+    "network-manager",
+    "modemmanager",
+    "upower"
+  ]
+}

@@ -8,8 +8,8 @@
 
 | 路径 | 职责 |
 | --- | --- |
-| `common/` | 主路自动充电、霍尔到 `SW_LID` 的映射、USB 地址、ACM getty 依赖、远程服务就绪辅助。 |
-| `profiles/desktop/server/` | 全屏控制台登录、普通日志限制、保持合盖运行、networkd。 |
+| `common/` | 主路自动充电、USB 地址、ACM getty 依赖、远程服务就绪辅助。 |
+| `profiles/desktop/server/` | 霍尔到 `SW_LID` 的映射、全屏控制台登录、普通日志限制、保持合盖运行、networkd。 |
 | `desktop-common/` | KDE/GNOME 共用的 GNSS、手电筒、蓝牙、合盖桥和权限；C 控制程序在打包时安装。 |
 | `profiles/desktop/gnome/` | GDM Wayland 配置；不安装 KWin 会话脚本。 |
 | `profiles/desktop/kde/` | KWin 虚拟键盘联动资源；合盖动作由 KDE/PowerDevil 配置决定，网络由桌面管理。 |
@@ -17,7 +17,7 @@
 
 `desktop/server` 和 `desktop/kde` 共用 desktop 内核。顶层 `server` 尚未实现，不使用这些配置。内部构建参数暂用 `server`、`kde`，对应上面两个完整 profile，不表示顶层 server。
 
-霍尔模块默认只给出磁感应状态；`common/etc/modprobe.d/w202-hall.conf` 显式选 `switch_code=0`，才将有效磁感应解释为 `SW_LID=1`。模块仍由 udev 按设备匹配加载，不另加强制加载服务。部署时须检查所选霍尔模块是否支持 `switch_code`；独立 rootfs 打包不检查内核二进制。desktop/server 通过 logind 配置忽略合盖电源动作；desktop/kde 不继承此覆盖，由桌面选动作。读取 `LidClosed` 不会更改策略。
+霍尔模块默认只给出磁感应状态；`profiles/desktop/server/etc/modprobe.d/w202-hall.conf` 显式选 `switch_code=0`，才将有效磁感应解释为 `SW_LID=1`。模块仍由 udev 按设备匹配加载，不另加强制加载服务。部署时须检查所选霍尔模块是否支持 `switch_code`；独立 rootfs 打包不检查内核二进制。desktop/server 通过 logind 配置忽略合盖电源动作；desktop/kde 不继承此覆盖，由桌面选动作。读取 `LidClosed` 不会更改策略。
 
 两种 profile 均安装选定组件的用户态服务；硬件可用性仍取决于部署时安装的匹配模块。KDE 不安装 Server 的全屏控制台/合盖覆盖，并移除本工程的 networkd 启用链接。可选 KDE 网络集成见 [`../desktop/kde/`](../desktop/kde/README.md)，可选控制台策略工具见 [`../userspace/display/`](../userspace/display/README.md)。
 
@@ -37,3 +37,6 @@ SSH 使用发行版自身的启动条件，不依赖显示、键盘、USB gadget
 先按 [`../desktop/common/`](../desktop/common/README.md) 构建 ARM64 C 控制程序，
 缺失或错误架构时打包提前失败。KDE 的合盖唤醒补偿仍只在 KDE 会话运行；
 GNOME 使用自己的电源管理。此处不提供已有根树之间的 DE 就地切换。
+
+
+独立包由 [`packages.json`](packages.json) 将上述策略映射为板级基础、通用 DE 兼容和具体桌面适配；构建入口为 `scripts/layers.py`，用法见 [`overlay/`](../../../overlay/README.md)。rootfs 的模板合并仅发生在各包自己的暂存目录，最终通过 dpkg 安装。标准发行版文件不归板级包重复拥有。

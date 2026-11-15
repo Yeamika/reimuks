@@ -140,6 +140,7 @@ class DistributionTest(unittest.TestCase):
         for name, relative in raw['profiles'].items():
             inline['profiles'][name] = json.loads((ROOT/'distributions/debian'/relative).read_text())
         inline["additional_packages"] = copy.deepcopy(self.distro["additional_packages"])
+        inline["desktop_common"] = copy.deepcopy(self.distro["desktop_common"])
         self.assertEqual(registry.identity(inline), registry.identity(self.distro))
 
     def test_referenced_mapping_changes_identity_and_invalid_paths_fail(self):

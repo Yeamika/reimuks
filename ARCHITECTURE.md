@@ -43,3 +43,24 @@ REIMUKS 安装该组件，不在 KDE 配置中重复定义频率。
 rootfs 构建入口、打包与校验已解除强制内核输入；板级组件的用户态文件可以离线安装。
 模块 ABI、驱动参数支持检查属于内核配套包/部署检查，不属于独立 rootfs 的发行版校验。
 完整安装流程还需对独立配套产物执行上述部署检查，不能仅凭 rootfs 打包成功就刷盘。
+
+## 可独立组合的软件包层
+
+`overlay/` 提供分包入口，具体源码与策略继续由发行版/设备目录维护：
+
+1. 通用基础 rootfs：标准命令行用户空间，不携带板级或 DE 集成包。
+2. `reimuks-w202ds-board`：板级基础服务、硬件运行库与接口，Server 也可使用。
+3. `reimuks-de-common`：发行版通用图形、音频、输入、传感器及系统服务依赖。
+4. `reimuks-w202ds-de-compat`：W202DS 对上述通用桌面接口的接入，不依赖具体 DE。
+5. `reimuks-de-kde` / `reimuks-de-gnome`：发行版标准 DE 及 Wayland 登录。
+6. `reimuks-w202ds-kde` / `reimuks-w202ds-gnome`：具体桌面控件、会话及板级行为适配。
+7. 可选 apps 包、独立私有 user overlay。
+
+`reimuks-w202ds-server` 独立提供控制台登录、networkd 和合盖策略，不作为图形桌面的父包。
+通用 DE 兼容包依赖板级基础与发行版桌面接口；具体桌面适配同时依赖兼容包和对应标准 DE。
+所有软件层使用 dpkg/APT 记录依赖与文件归属。源码模板先生成独立 `.deb`，rootfs 打包通过目标 dpkg 安装，不再直接覆盖发行版文件。
+上游 ModemManager 的通用 udev、D-Bus、PolicyKit 文件由发行版包拥有；板级包只提供私有扩展。
+
+`pack.py rootfs --profile server --base-only` 生成基础归档。
+`pack.py rootfs --profile kde --from-base` 从已配置的标准基础包树暂存，离线安装桌面依赖和板级包，完成启动前检查后生成完整 rootfs。普通 KDE/GNOME 完整构建也使用相同的集成包。
+软件包拆分不改变内核、initramfs、EFI/ESP 的职责；本流程不刷机。

@@ -18,8 +18,8 @@ from tree_cleanup import remove_tree
 from distributions import identity
 from fakeroot_state import snapshot, reconcile, relocate
 from startup_preflight import verify as verify_startup
-from board_userspace import prepare_rootfs as prepare_board_rootfs
-from board_userspace import install_rootfs as install_board_rootfs, install_initramfs as install_board_initramfs
+from board_userspace import install_initramfs as install_board_initramfs
+from layers import install_packages as install_layer_packages, install_desktop
 
 
 def validate_kernel_config(config_text):
@@ -202,25 +202,36 @@ def compress_rootfs(root, work, output, profile):
     compress_stream(command, environment, output/f'desktop-{profile}-arm64-rootfs.tar.gz.part')
 
 
-def rootfs(profile, user_overlay=None):
+def rootfs(profile, user_overlay=None, base_only=False, from_base=False, de_cache=None):
     os.umask(0o022)
     if user_overlay is not None:
         raise ValueError('Package private files with user_overlay.py, then merge with the base archive')
     import subprocess
-    backend.check_rootfs(profile)
-    source_root = backend.profile_directory(profile)/'rootfs'
+    if base_only and (profile != 'server' or from_base):
+        raise ValueError('Base-only requires server and cannot compose a desktop')
+    if from_base and profile not in ('kde', 'gnome'):
+        raise ValueError('From-base requires a desktop profile')
+    if from_base:
+        de_cache = de_cache or backend.distribution_build()/('apt-de-'+profile)
+        if not (de_cache/'fetch-complete.json').is_file():
+            raise ValueError('Fetch the offline desktop closure first: scripts/layers.py fetch --profile '+profile)
+    source_profile = 'server' if from_base else profile
+    backend.check_rootfs(source_profile)
+    source_root = backend.profile_directory(source_profile)/'rootfs'
     status = source_root/'var/lib/dpkg/status'
     installed = {line.removeprefix('Package: ') for line in status.read_text().splitlines()
                  if line.startswith('Package: ')} if status.is_file() else set()
     applications = set(backend.DISTRIBUTION.get('additional_packages', {}).get('packages', []))
     if installed & applications:
         raise SystemExit('Optional applications remain in the base tree; refresh fetch selection and configure before packing')
-    work = backend.profile_directory(profile)/'work'
-    audit = work/'dpkg-audit.txt'
-    if not (work/'configured').exists() or not audit.exists() or audit.stat().st_size:
+    source_work = backend.profile_directory(source_profile)/'work'
+    audit = source_work/'dpkg-audit.txt'
+    if not (source_work/'configured').exists() or not audit.exists() or audit.stat().st_size:
         raise SystemExit('Rootfs is not fully configured and audited')
-    if not (work/'clean-rootfs-v1').exists():
+    if not (source_work/'clean-rootfs-v1').exists():
         raise SystemExit('Legacy rootfs staging may contain old overlays; reassemble and configure from the package cache first')
+    work = backend.distribution_build()/('layers/compose-'+profile) if from_base else source_work
+    work.mkdir(parents=True, exist_ok=True)
     root = work/'package-rootfs'
     if root.is_symlink():
         raise ValueError('Package staging must not be a symlink')
@@ -228,7 +239,7 @@ def rootfs(profile, user_overlay=None):
         remove_tree(root)
     # A fresh tree per pack; never merge overlays back into configured packages.
     subprocess.run(['cp', '--archive', '--reflink=auto', str(source_root), str(root)], check=True)
-    saved = work/'fakeroot.state'
+    saved = source_work/'fakeroot.state'
     staged_state = work/'package-fakeroot.state'
     if not saved.exists():
         raise SystemExit('Configured rootfs is missing package ownership state')
@@ -241,9 +252,17 @@ def rootfs(profile, user_overlay=None):
         directory = root/name
         if directory.is_dir() and not directory.is_symlink():
             directory.chmod(0o755)
+    # Capture host-side mode changes before dpkg updates target ownership state.
+    reconcile(staged_state, work/'normalized-fakeroot.state', root, before)
+    shutil.copyfile(work/'normalized-fakeroot.state', staged_state)
+    if from_base:
+        install_desktop(root, work, staged_state, profile,
+                        de_cache or backend.distribution_build()/('apt-de-'+profile))
+    layer_manifest = None
+    if not base_only:
+        layer_manifest = install_layer_packages(root, work, staged_state, profile)
+    before = snapshot(root)
     backend.configure_locale(profile, root)
-    install_board_rootfs(root, profile, backend.board_directory())
-    prepare_board_rootfs(root, backend.board_directory(), profile)
     (work/'startup-preflight.json').unlink(missing_ok=True)
     report = verify_startup(root, profile, proot)
     write(work/'startup-preflight.json', json.dumps(report, indent=2)+'\n')
@@ -275,6 +294,7 @@ test ! -s /work/dpkg-audit.txt
 tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
  --exclude=./dev/* --exclude=./proc/* --exclude=./sys/* --exclude=./run/* \
  --exclude=./tmp/* --exclude=./host-rootfs --exclude=./packages \
+ --exclude=./layers --exclude=./de-packages \
  --exclude=./usr/lib/modules --exclude=./lib/modules \
  --exclude=./boot/Image-* --exclude=./boot/config-* \
  --exclude=./usr/lib/reimuks/kernel-release --exclude=./usr/lib/reimuks/kernel-image.sha256 \
@@ -283,24 +303,27 @@ tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
 ''',0o755)
     output=backend.artifact_directory()
     output.mkdir(parents=True, exist_ok=True)
-    compress_rootfs(root, work, output, profile)
-    dest=output/f'desktop-{profile}-arm64-rootfs.tar.gz'
+    label = 'base' if base_only else profile
+    compress_rootfs(root, work, output, label)
+    dest=output/f'desktop-{label}-arm64-rootfs.tar.gz'
     partial=dest.with_suffix(dest.suffix+'.part')
     partial.replace(dest)
-    shutil.copyfile(work/'packages.tsv',output/f'{profile}-packages.tsv')
-    receipt = backend.distribution_build()/f'apt-{profile}'/'fetch-complete.json'
+    shutil.copyfile(work/'packages.tsv',output/f'{label}-packages.tsv')
+    receipt = backend.distribution_build()/f'apt-{source_profile}'/'fetch-complete.json'
     debs = json.loads(receipt.read_text())['archives'] if receipt.exists() else {}
     login = {}
     for line in (root/'etc/shadow').read_text().splitlines():
         fields = line.split(':')
         if fields[0] in ('root', 'reimuks'):
             login[fields[0]] = 'locked' if fields[1].startswith(('!', '*')) else 'configured'
-    write(output/f'{profile}.manifest.json',json.dumps({
-        'profile':'desktop/'+profile,
+    write(output/f'{label}.manifest.json',json.dumps({
+        'profile':'base' if base_only else 'desktop/'+profile,
         'distribution':identity(backend.DISTRIBUTION),
         'suite':backend.DISTRIBUTION['suite'],'architecture':backend.DISTRIBUTION['architecture'],'kernel_independent':True,
         'packages':debs,'sha256':digest(dest),'hardware_tested':False,
-        'credentials':login, 'user_overlay': user_overlay is not None, 'startup_preflight':report},indent=2)+'\n')
+        'credentials':login, 'user_overlay': user_overlay is not None, 'startup_preflight':report,
+        'layers':layer_manifest, 'composed_from_base':from_base,
+        'desktop_archives':json.loads((de_cache/'fetch-complete.json').read_text())['archives'] if from_base else {}},indent=2)+'\n')
     remove_tree(root)
 
 
@@ -374,6 +397,9 @@ def main():
     p.add_argument('--board', default=os.environ.get('REIMUKS_BOARD', 'w202ds'))
     p.add_argument('--distribution',help='rootfs only; default: debian/trixie')
     p.add_argument('--user-overlay', type=Path, help='rootfs only; explicit private user resources')
+    p.add_argument('--base-only', action='store_true', help='rootfs/server only; omit board and desktop packages')
+    p.add_argument('--from-base', action='store_true', help='rootfs only; compose desktop using the configured server base')
+    p.add_argument('--de-cache', type=Path, help='rootfs --from-base; authenticated offline desktop cache')
     p.add_argument('--early-module', action='append', default=[], help='initramfs only; matched module to load before mounting root')
     p.add_argument('--output', type=Path, help='initramfs only; reusable output directory containing root/ and the archive')
     for name in ('image','modules','config','identity'):
@@ -385,6 +411,10 @@ def main():
         p.error('--early-module and --output apply only to initramfs')
     if a.user_overlay is not None and a.action != 'rootfs':
         p.error('--user-overlay applies only to rootfs')
+    if a.action != 'rootfs' and (a.base_only or a.from_base or a.de_cache):
+        p.error('Layer composition options apply only to rootfs')
+    if a.de_cache and not a.from_base:
+        p.error('--de-cache requires --from-base')
     backend.select_board(a.board)
     backend.select_distribution((a.distribution or os.environ.get('REIMUKS_DISTRIBUTION', backend.DEFAULT))
                                 if a.action == 'rootfs' else backend.DEFAULT)
@@ -397,7 +427,7 @@ def main():
     elif a.action=='kernel-runtime':
         print(kernel_runtime())
     else:
-        rootfs(a.profile, a.user_overlay)
+        rootfs(a.profile, a.user_overlay, a.base_only, a.from_base, a.de_cache)
 
 if __name__=='__main__':
     os.umask(0o022)

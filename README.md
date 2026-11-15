@@ -256,3 +256,18 @@ rootfs、内核运行包和 ESP 分别构建、分别校验；rootfs 不包含�
 附加应用不默认加入基础 rootfs；通过 [overlay/apps](overlay/apps/README.md) 单独构建和安装。应用软件源与 Chrome 启动策略随附加包提供，桌面基础层仍保留通用加速 API。APT 缓存可保留其他软件组的包，但 assemble 只安装当前 fetch 清单选定且已校验的文件。
 
 rootfs 的 tar 流仍由目标端 fakeroot 生成以保留包元数据，压缩由宿主机的 `gzip` 执行；宿主机需提供 gzip。只有归档与压缩进程均成功才发布最终文件。
+
+
+## 可组合的桌面附加包
+
+基础 rootfs、板级基础、通用 DE 兼容、标准 DE、板级桌面适配与用户配置可独立交付。
+包名、构建和离线组合方法见 [`overlay/`](overlay/README.md)。标准 DE 使用发行版元包；板级通用兼容由 KDE/GNOME 共用，桌面专属控件单独打包。
+
+```sh
+python3 scripts/layers.py plan --profile kde
+python3 scripts/layers.py pack --profile kde --context build/kde/rootfs
+python3 scripts/layers.py fetch --profile kde
+python3 scripts/layers.py bundle --profile kde
+python3 reimuks.py --board w202ds --target rootfs --profile desktop/server --base-only
+python3 reimuks.py --board w202ds --target rootfs --profile desktop/kde --from-base
+```

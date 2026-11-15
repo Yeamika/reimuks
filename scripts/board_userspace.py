@@ -121,23 +121,30 @@ def service_link(root, relative, unit=None):
         link.symlink_to('/usr/lib/systemd/system/' + unit)
 
 
-def install_rootfs(root, profile, board=None):
-    board = Path(board) if board is not None else REPO / 'devices/w202ds'
+def policy_layers(board, profile, only=None):
+    """Resolve shared policy once; packages may select one responsibility."""
     policy = json.loads((board / 'rootfs/policy.json').read_text())
     if policy.get('schema') != 1:
         raise ValueError('Unsupported board rootfs policy schema')
-    # server/kde are the legacy internal names for desktop/server and desktop/kde.
     name = profile if profile.startswith('desktop/') else 'desktop/' + profile
     if name not in policy['profiles']:
         raise ValueError(f'Unsupported board rootfs profile: {name}')
     selected = policy['profiles'][name]
-    layers = [policy['common']]
+    layers = [('board', policy['common'])]
+    if selected.get('desktop_common'):
+        layers.append(('board-de', policy['desktop_common']))
+    layers.append(('board-profile', selected))
+    if only is not None and only not in dict(layers):
+        raise ValueError('Unavailable board layer: '+only)
+    return [value for key, value in layers if only is None or key == only]
+
+
+def install_rootfs(root, profile, board=None, only=None):
+    board = Path(board) if board is not None else REPO / 'devices/w202ds'
+    layers = policy_layers(board, profile, only)
     controls = []
     artifacts = []
     architecture = json.loads((board / 'board.json').read_text()).get('architecture')
-    if selected.get('desktop_common'):
-        layers.append(policy['desktop_common'])
-    layers.append(selected)
     enabled = {}
     for layer in layers:
         for artifact in layer.get('rootfs_artifacts', []):
@@ -178,14 +185,8 @@ def install_rootfs(root, profile, board=None):
         destination.chmod(0o755)
 
 
-def prepare_rootfs(root, board, profile):
-    policy = json.loads((board / 'rootfs/policy.json').read_text())
-    name = profile if profile.startswith('desktop/') else 'desktop/' + profile
-    selected = policy['profiles'][name]
-    layers = [policy['common']]
-    if selected.get('desktop_common'):
-        layers.append(policy['desktop_common'])
-    layers.append(selected)
+def prepare_rootfs(root, board, profile, only=None):
+    layers = policy_layers(board, profile, only)
     for layer in layers:
         for command in layer.get('preparers', []):
             script = relative_path(board, command)
@@ -193,13 +194,7 @@ def prepare_rootfs(root, board, profile):
 
 
 def verification_policy(board, profile):
-    policy = json.loads((board / 'rootfs/policy.json').read_text())
-    name = profile if profile.startswith('desktop/') else 'desktop/' + profile
-    selected = policy['profiles'][name]
-    layers = [policy['common']]
-    if selected.get('desktop_common'):
-        layers.append(policy['desktop_common'])
-    layers.append(selected)
+    layers = policy_layers(board, profile)
     return [layer.get('verify', {}) for layer in layers]
 
 

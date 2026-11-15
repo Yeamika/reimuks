@@ -44,8 +44,7 @@ class RootfsIndependence(unittest.TestCase):
                  patch.object(pack.backend, 'profile_directory', return_value=base / 'kde'), \
                  patch.object(pack.backend, 'distribution_build', return_value=base), \
                  patch.object(pack.backend, 'artifact_directory', return_value=output), \
-                 patch.object(pack, 'install_board_rootfs') as install, \
-                 patch.object(pack, 'prepare_board_rootfs'), \
+                 patch.object(pack, 'install_layer_packages', return_value={}) as install, \
                  patch.object(pack, 'verify_startup', return_value={'hardware_tested': False}), \
                  patch.object(pack, 'compress_rootfs', side_effect=archive):
                 pack.rootfs('kde')
@@ -57,7 +56,7 @@ class RootfsIndependence(unittest.TestCase):
                 pack.rootfs('kde')
                 self.assertFalse(stale.exists())
             self.assertEqual(install.call_count, 2)
-            self.assertEqual(install.call_args.args, (work/'package-rootfs', 'kde', pack.backend.board_directory()))
+            self.assertEqual(install.call_args.args, (work/'package-rootfs', work, work/'package-fakeroot.state', 'kde'))
             self.assertFalse((root/'usr/lib/reimuks/distribution.json').exists())
             manifest = json.loads((output / 'kde.manifest.json').read_text())
             self.assertTrue(manifest['kernel_independent'])

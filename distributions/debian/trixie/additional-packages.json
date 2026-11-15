@@ -11,20 +11,6 @@
     "vim",
     "lazygit"
   ],
-  "acceleration_packages": [
-    "libegl1",
-    "libgles2",
-    "libgl1",
-    "libva2",
-    "libva-drm2",
-    "libva-wayland2",
-    "libvulkan1",
-    "mesa-vulkan-drivers",
-    "mesa-va-drivers",
-    "vainfo",
-    "vulkan-tools",
-    "ffmpeg"
-  ],
   "repositories": [
     {
       "uri": "https://dl.google.com/linux/chrome/deb/",

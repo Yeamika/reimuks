@@ -156,7 +156,8 @@ def proot(root, command, bindings=(), **kwargs):
 
 
 def packages(profile):
-    return resolve_profile(profile, DISTRIBUTION)['packages']
+    from layers import requested_packages
+    return requested_packages(profile, board_directory(), DISTRIBUTION)
 
 
 def prepare_tools():

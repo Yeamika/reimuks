@@ -71,6 +71,7 @@ server 基础清单保留启动、登录、SSH、DNS/校时、文件系统管理
 清单，也不默认加入基础 rootfs。通过 `scripts/addons.py` 生成独立软件附加包；Chrome 和 VS Code 使用各自签名的软件源，公开密钥
 随配置提供并验证 SHA256，APT 仍须验证仓库签名和软件包哈希。
 
+通用桌面接口依赖统一定义在 `debian/trixie/desktop/common.json`，由 `reimuks-de-common` 元包管理；KDE/GNOME 标准包与板级通用 DE 兼容包分别依赖它。
 图形接口使用发行版 EGL/GLES/OpenGL、Vulkan loader、VA-API 和 V4L2。
 硬件驱动及其选择策略由板级提供，不用发行版脚本替换驱动。
 `reimuks-chrome` 默认使用 Wayland、ANGLE GLES 与 Linux GL 视频解码功能；

@@ -38,5 +38,6 @@
     "desktop/kde": "trixie/desktop/kde.json",
     "desktop/gnome": "trixie/desktop/gnome.json"
   },
-  "additional_packages": "trixie/additional-packages.json"
+  "additional_packages": "trixie/additional-packages.json",
+  "desktop_common": "trixie/desktop/common.json"
 }

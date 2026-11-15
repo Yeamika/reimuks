@@ -1,6 +1,6 @@
 # 附加软件
 
-发行版的软件包名称、额外软件源和加速依赖配置见 [Debian trixie 配置](../../distributions/debian/trixie/additional-packages.json)。软件组包含 Chrome、VS Code、btop、fastfetch、vim 和 lazygit，独立于桌面环境选择。
+发行版的软件包名称和额外软件源见 [Debian trixie 配置](../../distributions/debian/trixie/additional-packages.json)；通用加速依赖由 [DE 共用包](../../distributions/debian/trixie/desktop/common.json) 管理。软件组包含 Chrome、VS Code、btop、fastfetch、vim 和 lazygit，独立于桌面环境选择。
 
 ```sh
 python3 scripts/addons.py fetch --profile kde

@@ -30,6 +30,9 @@ def main():
     p.add_argument('--jobs', type=int, default=4)
     p.add_argument('--boot-inputs', type=Path, help='UEFI partition packaging inputs; defaults to the board-local config')
     p.add_argument('--user-overlay', type=Path, help='rootfs only; private user resources')
+    p.add_argument('--base-only', action='store_true', help='rootfs/server only; generic base without board or DE packages')
+    p.add_argument('--from-base', action='store_true', help='rootfs only; compose a desktop onto the configured server base')
+    p.add_argument('--de-cache', type=Path, help='rootfs --from-base; authenticated offline desktop dependency cache')
     p.add_argument('--kernel-profile', default='desktop')
     p.add_argument('--build-config', type=Path, help='board integration SDK/compiler configuration')
     p.add_argument('--plan', action='store_true', help='show the selected stages without building')
@@ -48,6 +51,10 @@ def main():
         p.error('provide --board, --target and positive --jobs')
     directory, config = registry[a.board]
     targets = set(a.target)
+    if (a.base_only or a.from_base or a.de_cache) and 'rootfs' not in targets:
+        p.error('Layer composition options require --target rootfs')
+    if a.de_cache and not a.from_base:
+        p.error('--de-cache requires --from-base')
     if 'esp' in targets:
         if not a.esp_tree or a.esp_size_mib is None:
             p.error('--target esp requires --esp-tree and --esp-size-mib')
@@ -83,8 +90,12 @@ def main():
         except ValueError as error:
             p.error(str(error))
         a.profile = [profile.removeprefix('desktop/') for profile in a.profile]
+        if a.base_only and (a.profile != ['server'] or a.from_base):
+            p.error('--base-only requires only desktop/server and cannot combine with --from-base')
+        if a.from_base and not set(a.profile).issubset({'kde', 'gnome'}):
+            p.error('--from-base requires KDE or GNOME')
     if a.plan:
-        print(json.dumps({'board': a.board, 'targets': [t for t in ['kernel', 'userspace', 'uefi', 'efi', 'kernel-runtime', 'rootfs', 'initramfs', 'esp'] if t in targets], 'profiles': a.profile, 'rootfs_requires_kernel': False, 'esp_tree': str(a.esp_tree) if a.esp_tree else None, 'esp_size_mib': a.esp_size_mib}, indent=2))
+        print(json.dumps({'board': a.board, 'targets': [t for t in ['kernel', 'userspace', 'uefi', 'efi', 'kernel-runtime', 'rootfs', 'initramfs', 'esp'] if t in targets], 'profiles': a.profile, 'rootfs_requires_kernel': False, 'base_only':a.base_only, 'from_base':a.from_base, 'esp_tree': str(a.esp_tree) if a.esp_tree else None, 'esp_size_mib': a.esp_size_mib}, indent=2))
         return
     if targets & {'initramfs', 'rootfs', 'kernel', 'kernel-runtime'}:
         os.environ['REIMUKS_BOARD'] = a.board
@@ -158,9 +169,17 @@ def main():
         output = backend.artifact_directory()
         checks = checks_by_output.setdefault(output, {'distribution': identity(distribution)})
         for profile in dict.fromkeys(a.profile):
-            ensure_rootfs(profile, apply_account_config=True)
-            run('pack.py','rootfs','--profile',profile, *(['--user-overlay', a.user_overlay.resolve()] if a.user_overlay else []))
-            checks[profile] = verify.verify_rootfs(output/f'desktop-{profile}-arm64-rootfs.tar.gz',profile)
+            ensure_rootfs('server' if a.from_base else profile, apply_account_config=True)
+            arguments = ['--profile',profile]
+            if a.base_only:
+                arguments += ['--base-only']
+            if a.from_base:
+                arguments += ['--from-base']
+            if a.de_cache:
+                arguments += ['--de-cache',a.de_cache.resolve()]
+            run('pack.py','rootfs',*arguments, *(['--user-overlay', a.user_overlay.resolve()] if a.user_overlay else []))
+            label = 'base' if a.base_only else profile
+            checks[label] = verify.verify_rootfs(output/f'desktop-{label}-arm64-rootfs.tar.gz',profile,a.base_only)
     if 'initramfs' in targets:
         # The board initramfs is independent of the selected rootfs distro/DE.
         os.environ['REIMUKS_DISTRIBUTION'] = DEFAULT

@@ -95,8 +95,10 @@ def verify_base_metadata(members, shadow):
         assert passwords.get(user) == '!', ('Base account must have a bare locked password', user)
 
 
-def verify_rootfs(path,profile):
-    policies = verification_policy(backend.board_directory(), profile)
+def verify_rootfs(path,profile,base_only=False):
+    if base_only and profile != 'server':
+        raise ValueError('A base archive uses the server profile')
+    policies = [] if base_only else verification_policy(backend.board_directory(), profile)
     with tarfile.open(path,'r|gz') as t:
         wanted={'etc/shadow','etc/passwd','usr/bin/bash','var/lib/dpkg/status','usr/lib/os-release',
                 'usr/lib/reimuks/distribution.json',
@@ -128,7 +130,7 @@ def verify_rootfs(path,profile):
             assert backend.DISTRIBUTION['id'] == DEFAULT, 'Legacy rootfs has no distribution identity'
         for name in members:
             assert not name.startswith('/') and '..' not in Path(name).parts,name
-            assert name.split('/',1)[0] not in ('host-rootfs','packages','work','output'),name
+            assert name.split('/',1)[0] not in ('host-rootfs','packages','layers','de-packages','work','output'),name
         verify_base_metadata(members, read('etc/shadow').decode())
         assert members['etc/shadow'].uid==0
         assert members['etc/shadow'].mode & 0o007 == 0
@@ -151,10 +153,17 @@ def verify_rootfs(path,profile):
             fields = dict(line.split(': ', 1) for line in block.splitlines()
                           if line and not line[0].isspace() and ': ' in line)
             installed_versions[fields['Package']] = fields['Version']
+        if base_only:
+            assert not any(name.startswith('reimuks-') for name in installed_versions), 'Integration package in generic base'
+            for desktop in ('desktop/kde', 'desktop/gnome'):
+                assert not set(backend.DISTRIBUTION['profiles'][desktop]['packages']) & installed_versions.keys(), 'DE package in generic base'
         optional = set(backend.DISTRIBUTION.get('additional_packages', {}).get('packages', []))
         assert not optional.intersection(installed_versions), ('Optional applications in base rootfs', sorted(optional.intersection(installed_versions)))
         check_package_versions(specification, installed_versions)
         required=specification['required_packages']
+        if not base_only:
+            from layers import plan
+            required = required + [entry['package'] for entry in plan(profile)]
         for pkg in required:
             assert any(b.startswith('Package: '+pkg+'\n') for b in blocks),pkg
         target=specification['target']
@@ -178,7 +187,10 @@ def main():
     parser.add_argument('--distribution',default=os.environ.get('REIMUKS_DISTRIBUTION', DEFAULT))
     parser.add_argument('--profile', choices=['server', 'kde', 'gnome'],
                         help='Verify only this rootfs, independently of initramfs or other profiles')
+    parser.add_argument('--base-only', action='store_true', help='Verify the generic base without board/DE layers')
     args=parser.parse_args()
+    if args.base_only and args.profile != 'server':
+        parser.error('--base-only requires --profile server')
     backend.select_board(args.board)
     initramfs = None
     if args.profile is None:
@@ -191,9 +203,10 @@ def main():
         result['initramfs'] = initramfs
     profiles = [args.profile] if args.profile else ['server', 'kde']
     for profile in profiles:
-        result[profile]=verify_rootfs(output/f'desktop-{profile}-arm64-rootfs.tar.gz',profile)
+        label = 'base' if args.base_only else profile
+        result[profile]=verify_rootfs(output/f'desktop-{label}-arm64-rootfs.tar.gz',profile,args.base_only)
     (output/'verification.json').write_text(json.dumps(result,indent=2)+'\n')
-    entries=[(f'desktop-{profile}-arm64-rootfs.tar.gz',result[profile]) for profile in profiles]
+    entries=[(f'desktop-{"base" if args.base_only else profile}-arm64-rootfs.tar.gz',result[profile]) for profile in profiles]
     if initramfs is not None and backend.DISTRIBUTION['id'] == DEFAULT:
         entries.insert(0, ('initramfs-arm64.cpio.lz4',result['initramfs']))
     (output/'SHA256SUMS').write_text(''.join(f'{v["sha256"]}  {name}\n' for name,v in entries))
