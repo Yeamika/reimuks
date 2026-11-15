@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from tree_cleanup import remove_tree
 from distributions import DEFAULT, load_distribution, identity, resolve_profile, sources_list, additional_repositories, repository_key, check_os_release, check_package_versions
 from accounts import load_accounts, password_operations, DEFAULT_CONFIG
 
@@ -265,7 +266,7 @@ def assemble(profile, state):
     if work.is_symlink():
         raise ValueError('Rootfs work directory must not be a symlink')
     if work.exists():
-        shutil.rmtree(work)
+        remove_tree(work)
     root.mkdir(parents=True)
     bind_distribution(profile_directory(profile)/'work')
     candidates = cached_packages(state)

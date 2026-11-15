@@ -13,11 +13,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 import pack as rootfs_pack
 import user_overlay
 from verify import verify_base_metadata
+from tree_cleanup import remove_tree
 from board_userspace import install_template
 from fakeroot_state import relocate
 
 
 class CleanPackaging(unittest.TestCase):
+    def test_cleanup_handles_restricted_directories_without_following_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'staging';outside=Path(tmp)/'outside';outside.mkdir()
+            (outside/'keep').write_text('retained')
+            restricted=root/'host-rootfs/nested';restricted.mkdir(parents=True)
+            (restricted/'link').symlink_to(outside,target_is_directory=True)
+            restricted.chmod(0);restricted.parent.chmod(0)
+            remove_tree(root)
+            self.assertFalse(root.exists())
+            self.assertEqual((outside/'keep').read_text(),'retained')
+
     def test_host_compression_stream_and_failed_producer(self):
         with tempfile.TemporaryDirectory() as tmp:
             output=Path(tmp)/'image.gz.part'

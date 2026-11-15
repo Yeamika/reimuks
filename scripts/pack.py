@@ -14,6 +14,7 @@ import sys
 import tarfile
 from build import BUILD, REPO, digest, write, proot
 import build as backend
+from tree_cleanup import remove_tree
 from distributions import identity
 from fakeroot_state import snapshot, reconcile, relocate
 from startup_preflight import verify as verify_startup
@@ -139,7 +140,7 @@ def initramfs(early_modules=(), output=None):
     if root.is_symlink():
         raise SystemExit(f'Initramfs work directory must not be a symlink: {root}')
     if root.exists():
-        shutil.rmtree(root)
+        remove_tree(root)
     for d in ('bin','sbin','lib','etc','dev','proc','sys','run','newroot'):
         (root/d).mkdir(parents=True,exist_ok=True)
     server = backend.board_build()/'initramfs-tools/root'
@@ -224,7 +225,7 @@ def rootfs(profile, user_overlay=None):
     if root.is_symlink():
         raise ValueError('Package staging must not be a symlink')
     if root.exists():
-        shutil.rmtree(root)
+        remove_tree(root)
     # A fresh tree per pack; never merge overlays back into configured packages.
     subprocess.run(['cp', '--archive', '--reflink=auto', str(source_root), str(root)], check=True)
     saved = work/'fakeroot.state'
@@ -294,7 +295,7 @@ tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
         'suite':backend.DISTRIBUTION['suite'],'architecture':backend.DISTRIBUTION['architecture'],'kernel_independent':True,
         'packages':debs,'sha256':digest(dest),'hardware_tested':False,
         'credentials':login, 'user_overlay': user_overlay is not None, 'startup_preflight':report},indent=2)+'\n')
-    shutil.rmtree(root)
+    remove_tree(root)
 
 
 def kernel_runtime():
