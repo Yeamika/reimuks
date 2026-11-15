@@ -25,9 +25,12 @@ def controls_binary(staging, name, architecture, flat=False):
     return binary
 
 
-def install_template(root, source):
+def install_template(root, source, private=False):
     if not source.is_dir():
         raise ValueError(f'Missing filesystem template: {source}')
+    existing_directories = {p: p.stat().st_mode & 0o7777
+                            for p in [root, *root.rglob('*')]
+                            if p.is_dir() and not p.is_symlink()}
     # copytree(dirs_exist_ok=True) merges directories but does not replace an
     # existing symlink. Shared-library install trees must remain repeatable.
     for entry in source.rglob('*'):
@@ -58,8 +61,18 @@ def install_template(root, source):
                         continue
                     if current.get('connection', 'uuid', fallback=None) == identifier:
                         return str(existing)
-        return shutil.copy2(src, dst)
+        result = shutil.copy2(src, dst)
+        if not private:
+            target.chmod(target.stat().st_mode & 0o7777 & ~0o022)
+        return result
     shutil.copytree(source, root, dirs_exist_ok=True, symlinks=True, copy_function=copy_file)
+    for path in [root, *root.rglob('*')]:
+        if path.is_dir() and not path.is_symlink():
+            mode = existing_directories.get(path)
+            if mode is not None:
+                path.chmod(mode)
+            elif not private:
+                path.chmod(path.stat().st_mode & 0o7777 & ~0o022)
 
 
 def install_component(root, board, name):

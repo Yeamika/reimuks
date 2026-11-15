@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 from distributions import DEFAULT, load_distribution, identity, resolve_profile, sources_list, additional_repositories, repository_key, check_os_release, check_package_versions
-from accounts import load_accounts, password_operations
+from accounts import load_accounts, password_operations, DEFAULT_CONFIG
 
 REPO = Path(__file__).resolve().parents[1]
 BUILD = REPO / 'build'
@@ -142,7 +142,9 @@ def proot(root, command, bindings=(), **kwargs):
             '-q', TOOLS / 'usr/bin/qemu-aarch64']
     for binding in bindings:
         args += ['-b', binding]
-    env = dict(os.environ, LC_ALL='C', SYSTEMD_OFFLINE='1',
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith('XDG_') and key not in ('QT_PLUGIN_PATH', 'QML2_IMPORT_PATH')}
+    env.update(HOME='/root', USER='root', LOGNAME='root', LC_ALL='C', SYSTEMD_OFFLINE='1',
                DEBIAN_FRONTEND='noninteractive', PATH='/usr/sbin:/usr/bin:/sbin:/bin')
     return run(args + command, env=env, **kwargs)
 
@@ -219,6 +221,7 @@ def cached_packages(state):
 
 
 def assemble(profile, state):
+    os.umask(0o022)
     receipt = state/'fetch-complete.json'
     if not receipt.is_file():
         raise SystemExit('Package fetch is incomplete; run fetch for this profile before assemble.')
@@ -235,6 +238,11 @@ def assemble(profile, state):
     root = profile_directory(profile) / 'rootfs'
     if root.exists():
         raise SystemExit(f'Refusing to overwrite {root}; resume via configure or use a fresh build directory.')
+    work = profile_directory(profile)/'work'
+    if work.is_symlink():
+        raise ValueError('Rootfs work directory must not be a symlink')
+    if work.exists():
+        shutil.rmtree(work)
     root.mkdir(parents=True)
     bind_distribution(profile_directory(profile)/'work')
     candidates = cached_packages(state)
@@ -259,6 +267,7 @@ def assemble(profile, state):
 
     write(root / 'etc/fstab', '# Root is mounted by REIMUKS initramfs. Add persistent mounts here.\n')
     write(root / 'etc/resolv.conf', Path('/etc/resolv.conf').read_text())
+    write(work/'clean-rootfs-v1', '1\n')
     return root
 
 
@@ -303,13 +312,16 @@ def configure_display(profile, root):
 
 
 def configure(profile, accounts=None):
-    load_accounts(accounts)  # Reject invalid policy before changing the rootfs.
+    os.umask(0o022)
+    accounts = accounts if accounts is not None else DEFAULT_CONFIG
+    load_accounts(accounts)  # Never discover private credentials implicitly during base setup.
     check_rootfs(profile)
     root = profile_directory(profile) / 'rootfs'
     state = distribution_build() / f'apt-{profile}'
     target = resolve_profile(profile, DISTRIBUTION)['target']
     script = '''#!/bin/sh
 set -eu
+umask 022
 export DEBIAN_FRONTEND=noninteractive LC_ALL=C
 # The initial extraction provides the programs needed by package preinst scripts.
 # Re-unpack under target fakeroot so archive ownership and postinst chown survive.
@@ -357,6 +369,7 @@ dpkg-query -W -f='${Package}\\t${Version}\\t${Architecture}\\t${Status}\\n' > /w
 
 
 def main():
+    os.umask(0o022)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['tools', 'fetch', 'assemble', 'configure', 'accounts', 'password'])
     parser.add_argument('--profile', choices=['server', 'kde', 'gnome'], default='server')

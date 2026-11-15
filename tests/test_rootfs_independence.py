@@ -21,8 +21,10 @@ class RootfsIndependence(unittest.TestCase):
             (root / 'etc/shadow').write_text('root:!:0:0:99999:7:::\n')
             work.mkdir()
             (work / 'configured').touch()
+            (work / 'clean-rootfs-v1').touch()
             (work / 'dpkg-audit.txt').touch()
             (work / 'packages.tsv').write_text('')
+            (work / 'fakeroot.state').touch()
 
             def archive(*args):
                 script = (work / 'archive.sh').read_text()
@@ -42,7 +44,16 @@ class RootfsIndependence(unittest.TestCase):
                  patch.object(pack, 'verify_startup', return_value={'hardware_tested': False}), \
                  patch.object(pack, 'proot', side_effect=archive):
                 pack.rootfs('kde')
-            install.assert_called_once_with(root, 'kde', pack.backend.board_directory())
+                # A removed integration file from the previous pack must not
+                # survive in either the configured source or the next package.
+                stale = work/'package-rootfs/obsolete-board-file'
+                stale.parent.mkdir(parents=True)
+                stale.write_text('previous package')
+                pack.rootfs('kde')
+                self.assertFalse(stale.exists())
+            self.assertEqual(install.call_count, 2)
+            self.assertEqual(install.call_args.args, (work/'package-rootfs', 'kde', pack.backend.board_directory()))
+            self.assertFalse((root/'usr/lib/reimuks/distribution.json').exists())
             manifest = json.loads((output / 'kde.manifest.json').read_text())
             self.assertTrue(manifest['kernel_independent'])
             self.assertNotIn('kernel', manifest)

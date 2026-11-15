@@ -15,6 +15,8 @@ class OfflineConfigure(unittest.TestCase):
             args = run.call_args.args[0]
             self.assertNotIn('/sys', args)
             self.assertEqual(run.call_args.kwargs['env']['SYSTEMD_OFFLINE'], '1')
+            self.assertEqual(run.call_args.kwargs['env']['HOME'], '/root')
+            self.assertFalse(any(k.startswith('XDG_') for k in run.call_args.kwargs['env']))
 
     def test_resume_retries_configuration_without_unpacking_complete_archives(self):
         with tempfile.TemporaryDirectory() as tmp:

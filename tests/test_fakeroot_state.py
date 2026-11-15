@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from fakeroot_state import snapshot, reconcile
+from fakeroot_state import snapshot, reconcile, relocate
 
 
 class FakerootState(unittest.TestCase):
@@ -31,7 +31,7 @@ class FakerootState(unittest.TestCase):
             self.assertIn(record(existing),result)
             self.assertIn(record(root),result)
             self.assertIn(record(node,stat.S_IFCHR|0o600),result)
-            self.assertNotIn(record(changed),result)
+            self.assertIn(record(changed),result)
             self.assertNotIn(record(config,stat.S_IFREG|0o644),result)
 
 

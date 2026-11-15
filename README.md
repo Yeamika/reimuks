@@ -166,13 +166,19 @@ rootfs 不带 Image、配置或模块。部署时将 rootfs 与匹配的 `kernel
 
 desktop/server 与 desktop/kde 共用 `config/accounts.json` 的账号策略，账号为 `root` 和 `reimuks`，仓库默认锁定密码。可将 `config/accounts.example.json` 复制为 Git 忽略的 `config/accounts.local.json`，分别设置 `password`（明文初始密码）、`password_hash`（crypt 哈希）、`password_env`（环境变量名）或 `locked: true`，每个账号只能选择一种。本地配置建议权限为 `0600`；真实密码不要放进被跟踪的配置文件。
 
-构建 rootfs 时自动读取本地账号配置，也可传 `--accounts <私有配置.json>`。重新打包已配置的 rootfs 时会应用明确提供或自动发现的本地配置；没有本地配置时保留已有账号。只更新本地 rootfs 的账号而不重装软件包：
+基础 rootfs 默认使用仓库的锁定账号策略，不自动读取本地账号文件；打包时仍会锁定 root/reimuks，并移除构建时生成的 SSH 主机密钥。主机密钥由部署后的 SSH 前置服务生成。私有账号、网络和蓝牙配置通过独立用户 overlay 合并，基础归档不会被修改。需要定制密码时，将对应目标系统的 shadow 配置放入私有 overlay，保持严格权限；不要把私有配置提交到仓库。
 
 ```sh
-python3 scripts/build.py accounts --profile server --accounts config/accounts.local.json
+python3 scripts/user_overlay.py pack --source <私有配置目录> --output build/artifacts/user-overlay.tar.gz
+python3 scripts/user_overlay.py merge \
+  --base build/artifacts/desktop-kde-arm64-rootfs.tar.gz \
+  --overlay build/artifacts/user-overlay.tar.gz \
+  --output build/artifacts/desktop-kde-arm64-deployment.tar.gz
 ```
 
-也可在交互终端执行 `python3 scripts/build.py password --profile server`，再重新执行对应的 `pack.py rootfs` 和 `verify.py`；KDE 将 profile 改为 `kde`。密码由目标系统的 `passwd` 交互读取。重新运行 `configure` 时会应用选定账号配置；密码通过标准输入传给目标系统，不写入命令参数或构建日志。
+私有目录采用目标系统相对路径，如 `etc/NetworkManager/system-connections/`、`var/lib/bluetooth/`、`home/reimuks/.ssh/`。overlay 和部署归档权限为 0600。合并保留基础目录权限和已有系统文件的 uid/gid，用户家目录按基础 passwd 中的 uid/gid 处理，拒绝穿越符号链接路径。合并输出是独立部署包，应在安装前重新检查用户配置，基础包的验证结果不替代部署包的配置验证。
+
+每次 rootfs 打包都会重建固定的 `work/package-rootfs` 暂存目录，从配置完成的包树复制，再安装当前板级文件；不把板级文件或 overlay 写回原树。需要额外暂存空间，支持 reflink 的文件系统会复用数据块。旧版曾原地打包的树必须移除 rootfs/work 后，从保留的 APT 缓存重新 assemble、configure；不能仅补一个标记文件继续打包。公开模板移除组/其他用户写权限，保留包目录已有权限与归属；目标命令固定 HOME、隔离 XDG 环境，构建使用 umask 022。
 
 管理账号也需部署者配置：同一命令增加 `--user root` 可设置目标 root 密码。初版不为 `reimuks` 自动授予 sudo 权限。
 

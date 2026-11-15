@@ -79,10 +79,26 @@ def verify_initramfs(path):
     return {'entries':len(e),'bytes':path.stat().st_size,'sha256':digest(path)}
 
 
+def verify_base_metadata(members, shadow):
+    for name in ('.', 'etc', 'usr', 'usr/bin', 'usr/lib', 'usr/libexec'):
+        if name in members:
+            info = members[name]
+            assert info.uid == 0 and info.gid == 0, ('Base directory ownership', name)
+            assert not info.mode & 0o022, ('Writable base directory', name)
+    for name in members:
+        assert not name.startswith('etc/ssh/ssh_host_'), ('Machine SSH key in base image', name)
+        assert name not in ('etc/shadow-', 'etc/gshadow-'), ('Account backup in base image', name)
+        assert name != 'state' and not name.startswith('state/'), ('Host staging residue', name)
+        assert name != 'usr/libexec/__pycache__/w202-hall-inputcpython-312.pyc', ('Obsolete board bytecode', name)
+    passwords = {line.split(':')[0]: line.split(':')[1] for line in shadow.splitlines() if ':' in line}
+    for user in ('root', 'reimuks'):
+        assert passwords.get(user, '').startswith(('!', '*')), ('Unlocked base account', user)
+
+
 def verify_rootfs(path,profile):
     policies = verification_policy(backend.board_directory(), profile)
     with tarfile.open(path,'r|gz') as t:
-        wanted={'etc/passwd','usr/bin/bash','var/lib/dpkg/status','usr/lib/os-release',
+        wanted={'etc/shadow','etc/passwd','usr/bin/bash','var/lib/dpkg/status','usr/lib/os-release',
                 'usr/lib/reimuks/distribution.json',
                 'etc/machine-id'}
         for policy in policies:
@@ -113,6 +129,7 @@ def verify_rootfs(path,profile):
         for name in members:
             assert not name.startswith('/') and '..' not in Path(name).parts,name
             assert name.split('/',1)[0] not in ('host-rootfs','packages','work','output'),name
+        verify_base_metadata(members, read('etc/shadow').decode())
         assert members['etc/shadow'].uid==0
         assert members['etc/shadow'].mode & 0o007 == 0
         assert members['etc/passwd'].uid==0

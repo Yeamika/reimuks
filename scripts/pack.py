@@ -15,9 +15,8 @@ import tarfile
 from build import BUILD, REPO, digest, write, proot
 import build as backend
 from distributions import identity
-from fakeroot_state import snapshot, reconcile
+from fakeroot_state import snapshot, reconcile, relocate
 from startup_preflight import verify as verify_startup
-from board_userspace import install_template
 from board_userspace import prepare_rootfs as prepare_board_rootfs
 from board_userspace import install_rootfs as install_board_rootfs, install_initramfs as install_board_initramfs
 
@@ -177,31 +176,57 @@ def initramfs(early_modules=(), output=None):
 
 
 def rootfs(profile, user_overlay=None):
+    os.umask(0o022)
+    if user_overlay is not None:
+        raise ValueError('Package private files with user_overlay.py, then merge with the base archive')
     import subprocess
     backend.check_rootfs(profile)
-    root = backend.profile_directory(profile)/'rootfs'
+    source_root = backend.profile_directory(profile)/'rootfs'
     work = backend.profile_directory(profile)/'work'
     audit = work/'dpkg-audit.txt'
     if not (work/'configured').exists() or not audit.exists() or audit.stat().st_size:
         raise SystemExit('Rootfs is not fully configured and audited')
+    if not (work/'clean-rootfs-v1').exists():
+        raise SystemExit('Legacy rootfs staging may contain old overlays; reassemble and configure from the package cache first')
+    root = work/'package-rootfs'
+    if root.is_symlink():
+        raise ValueError('Package staging must not be a symlink')
+    if root.exists():
+        shutil.rmtree(root)
+    # A fresh tree per pack; never merge overlays back into configured packages.
+    subprocess.run(['cp', '--archive', '--reflink=auto', str(source_root), str(root)], check=True)
+    saved = work/'fakeroot.state'
+    staged_state = work/'package-fakeroot.state'
+    if not saved.exists():
+        raise SystemExit('Configured rootfs is missing package ownership state')
+    relocate(saved, staged_state, source_root, root)
     write(root/'usr/lib/reimuks/distribution.json',json.dumps(identity(backend.DISTRIBUTION),indent=2)+'\n')
     before = snapshot(root)
     backend.configure_locale(profile, root)
     install_board_rootfs(root, profile, backend.board_directory())
     prepare_board_rootfs(root, backend.board_directory(), profile)
-    if user_overlay is not None:
-        install_template(root, user_overlay.resolve())
     (work/'startup-preflight.json').unlink(missing_ok=True)
     report = verify_startup(root, profile, proot)
     write(work/'startup-preflight.json', json.dumps(report, indent=2)+'\n')
     write(root/'usr/lib/reimuks/startup-preflight.json', json.dumps(report, indent=2)+'\n')
-    saved = work/'fakeroot.state'
     archive_state = work/'archive-fakeroot.state'
-    if saved.exists():
-        reconcile(saved, archive_state, root, before)
+    # Machine-specific SSH keys are generated on the deployed system.
+    for key in (root/'etc/ssh').glob('ssh_host_*'):
+        if key.is_file() or key.is_symlink():
+            key.unlink()
+    write(root/'usr/lib/systemd/system/reimuks-ssh-hostkeys.service',
+          '[Unit]\nDescription=Generate SSH host keys\nBefore=ssh.service\n'
+          '[Service]\nType=oneshot\nExecStart=/usr/bin/ssh-keygen -A\nRemainAfterExit=yes\n', 0o644)
+    write(root/'etc/systemd/system/ssh.service.d/10-hostkeys.conf',
+          '[Unit]\nRequires=reimuks-ssh-hostkeys.service\nAfter=reimuks-ssh-hostkeys.service\n', 0o644)
+    reconcile(staged_state, archive_state, root, before)
     write(work/'archive.sh',f'''#!/bin/sh
 set -eu
+umask 022
 systemd-sysusers
+passwd -l root
+passwd -l reimuks
+rm -f /etc/shadow- /etc/gshadow-
 cp -an /etc/skel/. /home/reimuks/
 chown -R reimuks:reimuks /home/reimuks
 dpkg --audit > /work/dpkg-audit.txt
@@ -234,7 +259,8 @@ tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
         'distribution':identity(backend.DISTRIBUTION),
         'suite':backend.DISTRIBUTION['suite'],'architecture':backend.DISTRIBUTION['architecture'],'kernel_independent':True,
         'packages':debs,'sha256':digest(dest),'hardware_tested':False,
-        'credentials':login, 'startup_preflight':report},indent=2)+'\n')
+        'credentials':login, 'user_overlay': user_overlay is not None, 'startup_preflight':report},indent=2)+'\n')
+    shutil.rmtree(root)
 
 
 def kernel_runtime():
@@ -316,6 +342,8 @@ def main():
         p.error('--distribution applies only to rootfs')
     if a.action != 'initramfs' and (a.early_module or a.output is not None):
         p.error('--early-module and --output apply only to initramfs')
+    if a.user_overlay is not None and a.action != 'rootfs':
+        p.error('--user-overlay applies only to rootfs')
     backend.select_board(a.board)
     backend.select_distribution((a.distribution or os.environ.get('REIMUKS_DISTRIBUTION', backend.DEFAULT))
                                 if a.action == 'rootfs' else backend.DEFAULT)
@@ -331,4 +359,5 @@ def main():
         rootfs(a.profile, a.user_overlay)
 
 if __name__=='__main__':
+    os.umask(0o022)
     main()
