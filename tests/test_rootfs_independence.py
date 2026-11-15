@@ -18,6 +18,8 @@ class RootfsIndependence(unittest.TestCase):
             work = base / 'kde/work'
             output = base / 'artifacts'
             (root / 'etc').mkdir(parents=True)
+            root.chmod(0o775)
+            (root / 'etc').chmod(0o775)
             (root / 'etc/shadow').write_text('root:!:0:0:99999:7:::\n')
             work.mkdir()
             (work / 'configured').touch()
@@ -27,6 +29,9 @@ class RootfsIndependence(unittest.TestCase):
             (work / 'fakeroot.state').touch()
 
             def archive(*args):
+                staged = work/'package-rootfs'
+                self.assertEqual(staged.stat().st_mode & 0o777, 0o755)
+                self.assertEqual((staged/'etc').stat().st_mode & 0o777, 0o755)
                 script = (work / 'archive.sh').read_text()
                 self.assertNotIn('depmod', script)
                 self.assertIn('--exclude=./usr/lib/modules', script)

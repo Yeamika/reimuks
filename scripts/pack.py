@@ -235,6 +235,12 @@ def rootfs(profile, user_overlay=None):
     relocate(saved, staged_state, source_root, root)
     write(root/'usr/lib/reimuks/distribution.json',json.dumps(identity(backend.DISTRIBUTION),indent=2)+'\n')
     before = snapshot(root)
+    # These base directories must not inherit a build host's shared umask.
+    # Keep package-specific directory permissions elsewhere intact.
+    for name in ('.', 'etc', 'usr', 'usr/bin', 'usr/lib', 'usr/libexec'):
+        directory = root/name
+        if directory.is_dir() and not directory.is_symlink():
+            directory.chmod(0o755)
     backend.configure_locale(profile, root)
     install_board_rootfs(root, profile, backend.board_directory())
     prepare_board_rootfs(root, backend.board_directory(), profile)
