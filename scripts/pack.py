@@ -283,6 +283,9 @@ set -eu
 umask 022
 {{
 systemd-sysusers
+if getent passwd man >/dev/null && test -d /var/cache/man; then
+    chown -R man:man /var/cache/man
+fi
 usermod --password '!' root
 usermod --password '!' reimuks
 rm -f /etc/shadow- /etc/gshadow-
