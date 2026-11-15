@@ -188,7 +188,17 @@ devices/w202ds/
 └── boot   -> ../../../w202ds-boot
 ```
 
-Git 中两项都是固定提交的 submodule/gitlink，远程同为 `Yeamika/w202ds-linux`，分别对应 `6.18.35` 与 `boot` 分支；本地使用上述相对符号链接。当前 boot 及 pj4edk2 中间件的源码提交只保存在本地，它们的远端分支只发布 readme.md，因此本地固定源码提交不保证能从远端获取。这套本地布局不能直接当作已经发布、可全新递归克隆的源码发行版。
+Git 中两项都是固定提交的 submodule/gitlink，远程同为 `Yeamika/w202ds-linux`，分别对应 `6.18.35` 与 `boot` 分支。共享 PocketJS 组件使用 `Yeamika/pj4edk2` 的对应分支。Polaris 的 kernel 和 boot 分别引用 `Yeamika/Polaris-linux` 的 `7.1-rc1` 与 `boot` 分支；这些依赖必须先发布，再更新本仓库的固定提交。
+
+```sh
+git submodule sync --recursive
+git submodule update --init
+# 按目标初始化其下的依赖；例如 W202DS：
+git -C devices/w202ds/kernel submodule update --init
+git -C devices/w202ds/boot submodule update --init
+```
+
+子模块按记录的提交检出，不使用 `--remote` 自动追踪最新分支。开发环境可用相对符号链接连接独立检出的同一提交；提交时仍须保留 gitlink，不能把链接目标或工作目录路径写入仓库。工具链、原厂固件和私有配置仍是单独的构建输入。
 
 启动包组装入口为 `scripts/boot_bundle.py`，生成独立的内核、initramfs、DTB、校验元数据和 `linuxboot.conf`；LinuxBoot EFI 从 ESP 配置选择文件、根分区 PARTUUID 和启动参数。调整启动目标不需要重新生成 initramfs。接口见 [启动交接说明](boot/doces/efi_dtbchosen.md)。
 
