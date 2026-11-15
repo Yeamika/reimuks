@@ -68,13 +68,13 @@ server 基础清单保留启动、登录、SSH、DNS/校时、文件系统管理
 
 桌面附加应用由 `debian/trixie/additional-packages.json` 独立定义，KDE、GNOME
 共用 Chrome、VS Code、btop、fastfetch、vim、lazygit；不把它们写进 DE 元包
-清单，也不加入 Server。Chrome 和 VS Code 使用各自签名的软件源；公开密钥
+清单，也不默认加入基础 rootfs。通过 `scripts/addons.py` 生成独立软件附加包；Chrome 和 VS Code 使用各自签名的软件源，公开密钥
 随配置提供并验证 SHA256，APT 仍须验证仓库签名和软件包哈希。
 
 图形接口使用发行版 EGL/GLES/OpenGL、Vulkan loader、VA-API 和 V4L2。
 硬件驱动及其选择策略由板级提供，不用发行版脚本替换驱动。
 `reimuks-chrome` 默认使用 Wayland、ANGLE GLES 与 Linux GL 视频解码功能；
-可显式传入 `--reimuks-vulkan` 测试 ANGLE Vulkan。菜单入口通过用户级 desktop
+可显式传入 `--reimuks-vulkan` 测试 ANGLE Vulkan。附加包通过本地 desktop
 覆盖使用该启动器，不修改发行版的 Chrome desktop 文件，也不禁用浏览器沙箱。
 板级可在 `/etc/reimuks/acceleration.json` 指定 `va_driver`；该名称只是 libva
 后端选择，不保证视频实际走硬件，仍需检查浏览器 GPU 页面和解码统计。

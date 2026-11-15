@@ -194,7 +194,6 @@
     ],
     "verify": {
       "files": [
-        "usr/bin/reimuks-chrome",
         "etc/reimuks/acceleration.json",
         "etc/environment.d/60-w202-video.conf",
         "usr/lib/aarch64-linux-gnu/dri/v4l2_request_drv_video.so"

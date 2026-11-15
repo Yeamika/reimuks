@@ -14,6 +14,11 @@ import build
 
 
 class ApplicationBundle(unittest.TestCase):
+    def test_board_base_contract_does_not_require_optional_browser(self):
+        from board_userspace import verification_policy
+        for policy in verification_policy(Path(__file__).resolve().parents[1]/'devices/w202ds','kde'):
+            self.assertNotIn('usr/bin/reimuks-chrome',policy.get('files', []))
+
     def test_selects_solver_versions_and_ignores_other_cached_groups(self):
         with tempfile.TemporaryDirectory() as tmp:
             state=Path(tmp);(state/'archives').mkdir()
