@@ -37,7 +37,7 @@ test "$(id -u)" = 0 || { echo 'Root is required' >&2; exit 1; }
 cd "$(dirname "$0")"
 sha256sum -c SHA256SUMS
 # The bundle contains the dependency closure; never fetch missing dependencies.
-apt-get --no-download --no-install-recommends -y install "$PWD"/packages/*.deb
+apt-get -o Dir::Cache::archives="$PWD/packages/" --no-download --no-install-recommends -y install "$PWD"/packages/*.deb
 cp -a rootfs/. /
 python3 configure.py
 '''
