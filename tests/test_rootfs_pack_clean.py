@@ -19,6 +19,26 @@ from fakeroot_state import relocate
 
 
 class CleanPackaging(unittest.TestCase):
+    def test_password_overlay_preserves_new_base_service_accounts(self):
+        base=b'root:!:1:0:99999:7:::\nreimuks:!:1:0:99999:7:::\nservice:!*:1:0:99999:7:::\n'
+        private=b'root:$6$example:1:0:99999:7:::\nreimuks:$6$example:1:0:99999:7:::\n'
+        result=user_overlay.merge_passwords(base,private)
+        self.assertIn(b'service:!*:',result)
+        self.assertIn(b'root:$6$example:',result)
+        self.assertEqual(len(result.splitlines()),3)
+
+    def test_host_python_caches_in_source_templates_never_enter_rootfs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'source';root=Path(tmp)/'root';root.mkdir()
+            cache=source/'usr/libexec/__pycache__';cache.mkdir(parents=True)
+            (cache/'obsolete.cpython-312.pyc').write_bytes(b'old compiled code')
+            (source/'usr/libexec/old.pyc').write_bytes(b'old compiled code')
+            (source/'usr/libexec/current').write_text('current runtime')
+            install_template(root,source)
+            self.assertFalse((root/'usr/libexec/__pycache__').exists())
+            self.assertFalse((root/'usr/libexec/old.pyc').exists())
+            self.assertTrue((root/'usr/libexec/current').is_file())
+
     def test_cleanup_handles_restricted_directories_without_following_links(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'staging';outside=Path(tmp)/'outside';outside.mkdir()
@@ -70,8 +90,9 @@ class CleanPackaging(unittest.TestCase):
         for path in ['etc/ssh/ssh_host_ed25519_key','state/cache','etc/shadow-']:
             with self.assertRaises(AssertionError):
                 verify_base_metadata({path:tarfile.TarInfo(path)}, passwords)
-        with self.assertRaisesRegex(AssertionError,'Unlocked'):
-            verify_base_metadata({}, passwords.replace('root:!:', 'root:$6$hash:'))
+        for password in ('$6$hash','!$6$hash'):
+            with self.assertRaisesRegex(AssertionError,'bare locked'):
+                verify_base_metadata({}, passwords.replace('root:!:', 'root:'+password+':'))
 
     def test_legacy_contaminated_staging_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -258,8 +258,8 @@ set -eu
 umask 022
 {{
 systemd-sysusers
-passwd -l root
-passwd -l reimuks
+usermod --password '!' root
+usermod --password '!' reimuks
 rm -f /etc/shadow- /etc/gshadow-
 cp -an /etc/skel/. /home/reimuks/
 chown -R reimuks:reimuks /home/reimuks

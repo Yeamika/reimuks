@@ -168,7 +168,7 @@ rootfs 不带 Image、配置或模块。部署时将 rootfs 与匹配的 `kernel
 
 desktop/server 与 desktop/kde 共用 `config/accounts.json` 的账号策略，账号为 `root` 和 `reimuks`，仓库默认锁定密码。可将 `config/accounts.example.json` 复制为 Git 忽略的 `config/accounts.local.json`，分别设置 `password`（明文初始密码）、`password_hash`（crypt 哈希）、`password_env`（环境变量名）或 `locked: true`，每个账号只能选择一种。本地配置建议权限为 `0600`；真实密码不要放进被跟踪的配置文件。
 
-基础 rootfs 默认使用仓库的锁定账号策略，不自动读取本地账号文件；打包时仍会锁定 root/reimuks，并移除构建时生成的 SSH 主机密钥。主机密钥由部署后的 SSH 前置服务生成。私有账号、网络和蓝牙配置通过独立用户 overlay 合并，基础归档不会被修改。需要定制密码时，将对应目标系统的 shadow 配置放入私有 overlay，保持严格权限；不要把私有配置提交到仓库。
+基础 rootfs 默认使用仓库的锁定账号策略，不自动读取本地账号文件；打包时将 root/reimuks 重置为不含密码哈希的锁定状态，并移除构建时生成的 SSH 主机密钥。主机密钥由部署后的 SSH 前置服务生成。私有账号、网络和蓝牙配置通过独立用户 overlay 合并，基础归档不会被修改。需要定制密码时，将对应目标系统的 shadow 配置放入私有 overlay，保持严格权限；不要把私有配置提交到仓库。
 
 ```sh
 python3 scripts/user_overlay.py pack --source <私有配置目录> --output build/artifacts/user-overlay.tar.gz

@@ -2,6 +2,7 @@
 """Package private user files separately and merge them into a deployment archive."""
 import argparse
 import gzip
+import io
 import os
 from pathlib import Path, PurePosixPath
 import tarfile
@@ -63,6 +64,26 @@ def pack(source, output):
     archive(output, emit)
 
 
+def merge_passwords(base, private):
+    """Patch login accounts without replacing newly added system accounts."""
+    updates = {}
+    for line in private.decode().splitlines():
+        fields = line.split(':')
+        if not line:
+            continue
+        if len(fields) != 9:
+            raise ValueError('Invalid private shadow record')
+        if fields[0] in ('root', 'reimuks'):
+            if fields[0] in updates:
+                raise ValueError('Duplicate private login account')
+            updates[fields[0]] = line
+    lines = base.decode().splitlines()
+    names = {line.split(':', 1)[0] for line in lines}
+    if updates.keys()-names:
+        raise ValueError('Private login account is absent from the base')
+    return ('\n'.join(updates.get(line.split(':',1)[0],line) for line in lines)+'\n').encode()
+
+
 def merge(base, overlay, output):
     if Path(output).resolve() in (Path(base).resolve(), Path(overlay).resolve()):
         raise ValueError('Deployment output must differ from input archives')
@@ -86,6 +107,12 @@ def merge(base, overlay, output):
                 fields = line.split(':')
                 if len(fields) >= 4:
                     users[fields[0]] = (int(fields[2]), int(fields[3]))
+        shadow = None
+        if 'etc/shadow' in additions:
+            if 'etc/shadow' not in base_entries or not additions['etc/shadow'].isfile():
+                raise ValueError('Password overlay requires regular shadow files')
+            shadow = merge_passwords(original.extractfile(base_entries['etc/shadow']).read(),
+                                     private.extractfile(additions['etc/shadow']).read())
         def emit(result):
             # Reopen for sequential extraction rather than seeking repeatedly
             # through a compressed base image.
@@ -108,7 +135,11 @@ def merge(base, overlay, output):
                 else:
                     info.uid = info.gid = 0
                 info.uname = info.gname = ''
-                result.addfile(info, private.extractfile(info) if info.isfile() else None)
+                if name == 'etc/shadow':
+                    info.size = len(shadow)
+                    result.addfile(info, io.BytesIO(shadow))
+                else:
+                    result.addfile(info, private.extractfile(info) if info.isfile() else None)
         archive(output, emit)
 
 

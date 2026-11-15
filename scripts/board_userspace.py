@@ -34,6 +34,8 @@ def install_template(root, source, private=False):
     # copytree(dirs_exist_ok=True) merges directories but does not replace an
     # existing symlink. Shared-library install trees must remain repeatable.
     for entry in source.rglob('*'):
+        if not private and ('__pycache__' in entry.relative_to(source).parts or entry.suffix in ('.pyc','.pyo')):
+            continue
         if entry.is_symlink():
             target = root/entry.relative_to(source)
             if target.is_dir() and not target.is_symlink():
@@ -65,7 +67,8 @@ def install_template(root, source, private=False):
         if not private:
             target.chmod(target.stat().st_mode & 0o7777 & ~0o022)
         return result
-    shutil.copytree(source, root, dirs_exist_ok=True, symlinks=True, copy_function=copy_file)
+    shutil.copytree(source, root, dirs_exist_ok=True, symlinks=True, copy_function=copy_file,
+                    ignore=None if private else shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo'))
     for path in [root, *root.rglob('*')]:
         if path.is_dir() and not path.is_symlink():
             mode = existing_directories.get(path)

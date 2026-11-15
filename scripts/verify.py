@@ -92,7 +92,7 @@ def verify_base_metadata(members, shadow):
         assert name != 'usr/libexec/__pycache__/w202-hall-inputcpython-312.pyc', ('Obsolete board bytecode', name)
     passwords = {line.split(':')[0]: line.split(':')[1] for line in shadow.splitlines() if ':' in line}
     for user in ('root', 'reimuks'):
-        assert passwords.get(user, '').startswith(('!', '*')), ('Unlocked base account', user)
+        assert passwords.get(user) == '!', ('Base account must have a bare locked password', user)
 
 
 def verify_rootfs(path,profile):
