@@ -1,48 +1,9 @@
-# W202DS Board
+# W202DS
 
-W202DS board integration lives in this directory. Kernel and boot sources are linked
-from their owning projects; this repository selects hardware components and defines
-board and profile policy.
+- [debian-server](targets/debian-server.json)：控制台、电源键和霍尔策略。合盖两秒息屏，开盖恢复，系统继续运行。
+- [debian-kde](targets/debian-kde.json) 组合 Pack2 和 KDE 适配；[debian-kde-remote](targets/debian-kde-remote.json) 还加入远程应用、TUI 工具及 `passkey`、`kde-theme`，输出 rootfs。
+- [debian-niri](targets/debian-niri.json) 组合 Pack2、Niri 和 passkey，输出 rootfs。
 
-```text
-devices/w202ds/
-├── board.json
-├── kernel -> ...
-├── boot -> ...
-├── initramfs/rootfs/
-├── overlays/
-│   ├── w202ds-kernel/
-│   ├── w202ds-hardwarepack2/
-│   ├── w202ds-server/
-│   ├── w202ds-hall-overlay/
-│   ├── w202ds-kde-hardwareuipack/
-│   └── w202ds-gnome-hardwareuipack/
-└── tests/
-```
+板级声明在 [board.json](board.json) 和 [overlays/](overlays/)。[Pack2](overlays/w202ds-hardwarepack2/src/README.md) 提供共享控制接口，[KDE 适配](overlays/w202ds-kde-hardwareuipack/src/kde/README.md) 负责界面和会话。内核和启动源码由 [子模块](../../.gitmodules) 提供。
 
-Each board overlay has a `layer.json`. The hardware pack owns common board files,
-userspace source and producer checks. Server selects the hardware pack, shared power
-key policy, server login policy and Hall display policy. KDE and GNOME select the
-same hardware pack and their own interface pack. Profile selections are in
-`config/boards/w202ds/{server,kde,gnome}.json`; the kernel layer only declares the
-matching kernel and module source artifacts.
-
-The generic power key policy is in `overlays/services/powerkey/`. Early boot files
-remain separate under `initramfs/rootfs/`. No rootfs/profile copy is maintained in
-parallel with the overlays.
-
-Inspect the selections:
-
-```sh
-python3 scripts/overlay-scan.py --board w202ds
-```
-
-The normal REIMUKS entrypoint builds the selected board integration and rootfs:
-
-```sh
-python3 reimuks.py --board w202ds --target userspace rootfs --profile desktop/server
-```
-
-Local compiler, producer and SDK paths belong in
-`devices/w202ds/overlays/w202ds-hardwarepack2/build.local.json`; use the adjacent
-`build.example.json` as a template. That local file is not part of the source layer.
+Pack2 的本地工具链配置以 [build.example.json](overlays/w202ds-hardwarepack2/build.example.json) 为模板。需要私有基带 NV 的预设在配方中指定 `rootfs.device_state`。

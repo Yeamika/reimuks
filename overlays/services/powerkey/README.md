@@ -1,11 +1,5 @@
-# Power key
+# 电源键服务
 
-Shared power-key policy, event service, and build entry point. Profiles without a
-board-specific daemon use logind's poweroff default. A profile that enables
-`reimuks-powerkey.service` supplies `/etc/default/reimuks-powerkey` with its input
-device name and action settings.
+共享短按、长按处理。`/etc/default/reimuks-powerkey` 配置输入设备、按键时长和动作；板级提供 `/usr/libexec/reimuks-display-toggle`。动作可选 `display-toggle`、`poweroff`、`suspend`、`ignore`。
 
-The source and press state machine are board-independent; display paths, blank values,
-input names, press timing, and short/long actions are runtime configuration. Supported
-actions are `display-toggle`, `poweroff`, `suspend`, and `ignore`. The input device is
-grabbed only while the service is active.
+由本层 [package.py](package.py) 出包，预设声明所需的板级接口。

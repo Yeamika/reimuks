@@ -1,9 +1,7 @@
-# REIMUKS Boot
+# 启动交接
 
-本目录记录 EFI、Linux 内核、initramfs 与根系统的交接约定。
+[`initramfs/init`](../initramfs/init) 优先读取 DT `/chosen/pj4edk2,root-partuuid`，兼容 `w202,root-partuuid`。值为 36 字节 GPT PARTUUID 加 NUL。无属性时回退到内核命令行 `root=`。
 
-- [DT `/chosen` 参数](doces/efi_dtbchosen.md)：initramfs 内存范围、根分区标识与启动显示信息。
+initramfs 挂载 ext4，并核对根系统记录的内核版本、Image 校验值和模块目录，再切换到根系统。
 
-启动配置位于 ESP，由 LinuxBoot EFI 读取；EFI 传递根分区 PARTUUID 和内核启动参数，initramfs 挂载根分区并交接给系统 init。切换根分区或 systemd 启动目标无需重新打包 initramfs。
-
-REIMUKS 不读取 GPT，也不把分区号或磁盘容量绑定到 rootfs 构建。ESP 文件树由明确指定的启动产物与配置组合；生成文件系统镜像时单独指定容量。分区表管理、格式化和刷写属于部署步骤。
+W202DS 可用 [`scripts/boot_bundle.py`](../scripts/boot_bundle.py) 从匹配的 Image、initramfs、DTB 和实际 PARTUUID 生成 ESP 载荷。LinuxBoot EFI 由板级启动工程提供；载荷组装不分区、不刷机。
