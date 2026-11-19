@@ -51,10 +51,18 @@ def prefetch(state, packages, workers=6, proxy=None, install_recommends=False):
             return
         partial = temporary/(filename+'.part')
         command = ['curl', *shlex.split(os.environ.get('REIMUKS_CURL_ARGS', '')), '--fail', '--location', '--connect-timeout', '15',
-                   '--max-time', '1800', '--retry', '3', '--retry-all-errors', '--continue-at', '-', '--silent', '--show-error']
+                   '--max-time', '1800', '--retry', '0', '--continue-at', '-', '--silent', '--show-error']
         if proxy:
             command += ['--noproxy', '', '--proxy', proxy]
-        subprocess.run([*command, '--output', str(partial), uri], check=True)
+        # Start a fresh curl process for each retry, so -C - recomputes the
+        # offset after a timeout. curl's internal retry restores the original
+        # output offset and can discard progress made during a long attempt.
+        for attempt in range(4):
+            result = subprocess.run([*command, '--output', str(partial), uri])
+            if result.returncode == 0:
+                break
+            if attempt == 3:
+                result.check_returncode()
         if not valid(partial):
             partial.unlink(missing_ok=True)
             raise ValueError('Package length/SHA256 mismatch: '+filename)

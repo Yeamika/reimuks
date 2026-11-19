@@ -1,0 +1,11 @@
+#!/bin/busybox sh
+/bin/busybox --install -s /bin
+n=0
+while [ ! -c /dev/watchdog0 ] && [ "$n" -lt 50 ]; do
+    sleep 0.1
+    n=$((n+1))
+done
+if ! /bin/polaris-boot-watchdog start; then
+    printf '<3>reimuks-polaris: userspace watchdog could not be armed\n' >/dev/kmsg
+    exit 1
+fi

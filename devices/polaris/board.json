@@ -3,15 +3,28 @@
   "board": "polaris",
   "architecture": "arm64",
   "boot_builder": "boot/pocketjs4edk2_uefi/build-firmware.py",
-  "profiles": [],
-  "supported_targets": [],
-  "status": "scaffold",
-  "unavailable_reason": "Polaris 7.1-rc1 kernel configuration, userspace policy and SDM845 boot port are pending",
+  "integration_builder": "../../scripts/overlay-build.py",
+  "profiles": ["desktop/server"],
+  "supported_targets": ["kernel", "kernel-runtime", "uefi", "efi", "esp", "initramfs", "userspace", "rootfs"],
+  "status": "bringup",
+  "additional_apt_components": ["non-free-firmware"],
+  "unavailable_reason": "Polaris currently supports the desktop hardware kernel and desktop/server rootfs",
   "kernel_release_suffix": "-polaris",
   "initramfs_early_modules": [],
+  "kernel_builder": "kernel/scripts/build.py",
+  "kernel_exporter": "kernel/scripts/runtime-export.py",
+  "kernel_runtime": "kernel/output/runtime-{profile}",
+  "initramfs_policy_files": {
+    "bin/polaris-usb-gadget": "overlays/polaris-hardware/files/usr/libexec/polaris-usb-gadget",
+    "bin/polaris-display-status": "overlays/polaris-hardware/files/usr/libexec/polaris-display-status"
+  },
+  "kernel_policy": {
+    "root_selection": ["DT /chosen/pj4edk2,root-partuuid", "cmdline root="],
+    "forbidden_configs": [],
+    "forbidden_cmdline_prefixes": [],
+    "initramfs_forbidden_paths": ["bin/w202-usb-gadget"]
+  },
   "placeholders": {
-    "server": "Polaris 7.1-rc1 profile port is pending",
-    "desktop/server": "Polaris 7.1-rc1 profile port is pending",
     "desktop/kde": "Polaris 7.1-rc1 profile port is pending",
     "desktop/gnome": "Polaris 7.1-rc1 profile port is pending",
     "desktop/niri": "Polaris 7.1-rc1 profile port is pending"

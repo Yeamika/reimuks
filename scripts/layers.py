@@ -29,16 +29,22 @@ def profile_name(profile):
     return profile
 
 
-def desktop_plan(profile, distribution=None):
-    profile = profile_name(profile)
+def common_runtime(distribution=None):
+    """Shared service/API runtime; contains no desktop environment."""
     distribution = distribution or build.DISTRIBUTION
-    if profile == 'server':
-        return []
     common = distribution.get('desktop_common', {})
     if not common:
         raise ValueError('Distribution has no common desktop package definition')
+    return dict(kind='de-common', package='reimuks-de-common', depends=common['packages'])
+
+
+def desktop_plan(profile, distribution=None):
+    profile = profile_name(profile)
+    if profile == 'server':
+        return []
+    distribution = distribution or build.DISTRIBUTION
     mapping = distribution['profiles']['desktop/'+profile]
-    return [dict(kind='de-common', package='reimuks-de-common', depends=common['packages']),
+    return [common_runtime(distribution),
             dict(kind='de-'+profile, package='reimuks-de-'+profile,
                  depends=list(dict.fromkeys(['reimuks-de-common', *mapping['packages'], *mapping['required_packages']])))]
 
@@ -47,13 +53,26 @@ def plan(profile, board=None, distribution=None):
     profile = profile_name(profile)
     board = board or build.board_directory()
     distribution = distribution or build.DISTRIBUTION
-    config = json.loads((board/'rootfs/packages.json').read_text())
+    board_file = board/'board.json'
+    board_id = json.loads(board_file.read_text()).get('board', board.name) if board_file.is_file() else board.name
+    package_config = build.REPO/'config/boards'/board_id/'packages.json'
+    if not package_config.is_file():
+        # Keep unported boards on their existing policy until their layer migration.
+        package_config = board/'rootfs/packages.json'
+    if not package_config.is_file():
+        raise ValueError(f'Missing package selection for board {board_id}')
+    config = json.loads(package_config.read_text())
     if config.get('schema') != 1:
         raise ValueError('Unsupported board package schema')
     result = [dict(config['board'], kind='board')]
-    if profile != 'server':
-        desktop = desktop_plan(profile, distribution)
-        result += [desktop[0], dict(config['board-de'], kind='board-de'), desktop[1]]
+    desktop = desktop_plan(profile, distribution)
+    compatibility = config.get('board-de')
+    # A console profile may opt into the same public interfaces without a DE.
+    if (profile == 'server' and compatibility and
+            compatibility['package'] in config['profiles'][profile]['depends']):
+        desktop = [common_runtime(distribution)]
+    if desktop:
+        result += [desktop[0], dict(compatibility, kind='board-de'), *desktop[1:]]
     result.append(dict(config['profiles'][profile], kind='board-'+profile))
     for entry in result:
         if not re.fullmatch(r'[a-z0-9][a-z0-9+.-]+', entry['package']):
@@ -61,7 +80,8 @@ def plan(profile, board=None, distribution=None):
     return result
 
 
-def package_tree(root, output, name, depends, kind, version=None, conflicts=(), replaces=()):
+def package_tree(root, output, name, depends, kind, version=None, conflicts=(), replaces=(),
+                 *, breaks=(), provides=(), architecture=None, version_base='1.0'):
     """dpkg owns payload files; private state and kernel artifacts never belong here."""
     for path in root.rglob('*'):
         relative = path.relative_to(root)
@@ -84,18 +104,24 @@ def package_tree(root, output, name, depends, kind, version=None, conflicts=(), 
         content.update(str(path.lstat().st_mode & 0o7777).encode())
     content.update(json.dumps(depends, sort_keys=True).encode())
     content.update(json.dumps([conflicts,replaces], sort_keys=True).encode())
+    if breaks:
+        content.update(json.dumps(breaks, sort_keys=True).encode())
+    if provides:
+        content.update(json.dumps(provides, sort_keys=True).encode())
     digest = content.hexdigest()
-    version = version or '1.0+'+digest[:16]
+    version = version or version_base+'+'+digest[:16]
     if not re.fullmatch(r'[0-9][a-zA-Z0-9.+:~\-]*', version):
         raise ValueError('Invalid Debian package version')
     control = root/'DEBIAN'
     control.mkdir(exist_ok=True)
     build.write(control/'control', f'Package: {name}\nVersion: {version}\n'
-                f'Architecture: {build.DISTRIBUTION["architecture"]}\n'
+                f'Architecture: {architecture or build.DISTRIBUTION["architecture"]}\n'
                 'Maintainer: REIMUKS maintainers\nSection: misc\nPriority: optional\n'
                 + ('Depends: '+', '.join(dict.fromkeys(depends))+'\n' if depends else '')
                 + ('Conflicts: '+', '.join(conflicts)+'\n' if conflicts else '')
                 + ('Replaces: '+', '.join(replaces)+'\n' if replaces else '')
+                + ('Breaks: '+', '.join(breaks)+'\n' if breaks else '')
+                + ('Provides: '+', '.join(provides)+'\n' if provides else '')
                 + f'Description: REIMUKS {kind} integration\n')
     if conffiles:
         build.write(control/'conffiles', '\n'.join(conffiles)+'\n')
@@ -142,6 +168,13 @@ def pack_board(profile, context=None, output=None):
             root = Path(tmp)/entry['kind']
             root.mkdir()
             install_rootfs(root, profile, board, only=entry['selector'])
+            if entry['kind'] == 'board':
+                distro = build.board_distribution(build.DISTRIBUTION['id'])
+                extra = [c for c in distro['components'] if c not in build.DISTRIBUTION['components']]
+                if extra:
+                    distro = dict(distro, components=extra)
+                    build.write(root/'etc/apt/sources.list.d/reimuks-board.list',
+                                build.sources_list(distro, target=True))
             # Upstream ModemManager policy belongs to the distro package. The
             # board supplies its private adapter and board-specific udev rules.
             for name in entry.get('omit', []):
@@ -194,16 +227,18 @@ def pack_board(profile, context=None, output=None):
 
 def pack_de(profile, output=None):
     profile = profile_name(profile)
-    if profile == 'server':
-        raise ValueError('Server has no desktop environment')
-    output = output or build.artifact_directory()/'layers'
-    work = build.distribution_build()/'layers/work'
+    output = output or build.shared_distribution()/'de'/profile/'layers'
+    work = build.shared_distribution()/'de'/profile/'work'
     work.mkdir(parents=True, exist_ok=True)
     result = []
     with tempfile.TemporaryDirectory(dir=work) as tmp:
-        for entry in desktop_plan(profile):
+        # Server only uses the common service/API package, never a GUI session.
+        entries = [common_runtime()] if profile == 'server' else desktop_plan(profile)
+        for entry in entries:
             root = Path(tmp)/entry['kind']
             root.mkdir()
+            if entry['kind'] == 'de-common':
+                build.configure_desktop_graphics(root)
             if entry['kind'] == 'de-'+profile:
                 if profile == 'kde':
                     build.configure_display(profile, root)
@@ -245,10 +280,61 @@ def requested_packages(profile, board=None, distribution=None, include_board=Tru
     return list(dict.fromkeys(requested))
 
 
+def board_dependencies(profile):
+    return list(dict.fromkeys(name for entry in plan(profile)
+                              if 'selector' in entry or (profile_name(profile) == 'server' and entry['kind'] == 'de-common')
+                              for name in entry['depends'] if not name.startswith('reimuks-')))
+
+
+def checked_board_cache(profile):
+    state = build.package_cache('apt-board-'+profile, board=True)
+    receipt = state/'fetch-complete.json'
+    expected = {'board': build.BOARD, 'profile': profile, 'packages': board_dependencies(profile),
+                'distribution': identity(build.board_distribution(build.DISTRIBUTION['id']))}
+    if not receipt.is_file():
+        raise ValueError('Fetch board dependencies first: scripts/layers.py fetch-board --profile '+profile)
+    record = json.loads(receipt.read_text())
+    if any(record.get(key) != value for key, value in expected.items()):
+        raise ValueError('Board dependency selection changed; run layers.py fetch-board again')
+    files = []
+    for name, digest in record['archives'].items():
+        if Path(name).name != name:
+            raise ValueError('Invalid board dependency archive path')
+        path = state/'archives'/name
+        if not path.is_file() or build.digest(path) != digest:
+            raise ValueError('Board dependency archive is missing or changed: '+name)
+        files.append(path)
+    if not files:
+        raise ValueError('Empty board dependency closure')
+    return state, sorted(files)
+
+
+def fetch_board(profile):
+    profile = profile_name(profile)
+    requested = board_dependencies(profile)
+    if not requested:
+        return None
+    try:
+        return checked_board_cache(profile)[0]
+    except (ValueError, FileNotFoundError):
+        pass
+    state = build.apt_state('apt-board-'+profile, build.DISTRIBUTION['architecture'],
+                            profile=profile, board=True)
+    build.apt(state, 'update')
+    build.apt(state, '--download-only', '--no-install-recommends', '-y', 'install', *requested)
+    files = selected_archives(state, requested, architecture=build.DISTRIBUTION['architecture'])
+    build.write(state/'fetch-complete.json', json.dumps({
+        'board': build.BOARD, 'profile': profile, 'packages': requested,
+        'distribution': identity(build.board_distribution(build.DISTRIBUTION['id'])),
+        'archives': {p.name: build.digest(p) for p in files}}, indent=2)+'\n')
+    checked_board_cache(profile)
+    return state
+
+
 def fetch(profile, offline=False, cache=None):
     profile = profile_name(profile)
     if offline:
-        source = (cache or build.distribution_build()/('apt-de-'+profile)).resolve()
+        source = (cache or build.package_cache('apt-de-'+profile)).resolve()
         receipt_path = source/'fetch-complete.json'
         previous = json.loads(receipt_path.read_text())
         # Re-selection may change package groups, but cannot cross a distro or
@@ -320,12 +406,12 @@ def bundle_de(profile, cache, output=None):
         raise ValueError('Desktop cache is not authenticated by its fetch receipt')
     packages = pack_de(profile)
     files = [(p,p.name) for p in selected] + [
-        (build.artifact_directory()/'layers'/p['file'],
+        (build.shared_distribution()/'de'/profile/'layers'/p['file'],
          p['package']+'_'+p['version']+'_'+build.DISTRIBUTION['architecture']+'.deb') for p in packages]
     manifest = {'schema':1, 'profile':profile, 'distribution':identity(build.DISTRIBUTION),
                 'board_drivers_included':False, 'packages':packages,
                 'archives':{name:build.digest(p) for p,name in files}}
-    output = output or build.artifact_directory()/f'de-{profile}-arm64.tar.gz'
+    output = output or build.shared_distribution()/'de'/profile/f'de-{profile}-arm64.tar.gz'
     def emit(result):
         def data(name, value, mode=0o644):
             info = tarfile.TarInfo(name); info.mode=mode; info.size=len(value)
@@ -348,21 +434,34 @@ def install_packages(root, work, saved, profile, context=None):
     """Use target dpkg/fakeroot so file lists and ownership enter the image."""
     output = build.artifact_directory()/'layers'
     manifest = pack_board(profile, context or root, output)
-    desktop = pack_de(profile, output) if profile_name(profile) != 'server' else []
+    desktop = pack_de(profile, output) if any(p['kind'] == 'de-common' for p in plan(profile)) else []
     manifest['desktop_packages'] = desktop
     files = [entry['file'] for entry in desktop+manifest['packages']]
+    dependencies = []
+    bindings = [f'{work}:/work', f'{output}:/layers']
+    if board_dependencies(profile):
+        state, archives = checked_board_cache(profile)
+        dependencies = ['/board-packages/'+p.name for p in archives]
+        bindings.append(f'{state}/archives:/board-packages')
     before = work/'layer-fakeroot.state'
     shutil.copyfile(saved, before)
     script = work/'install-layers.sh'
     build.write(script, '#!/bin/sh\nset -eu\numask 022\n'
                 'trap \'rm -f /usr/sbin/policy-rc.d\' EXIT\n'
                 'printf "#!/bin/sh\\nexit 101\\n" > /usr/sbin/policy-rc.d\nchmod 755 /usr/sbin/policy-rc.d\n'
-                +'dpkg --install '+ ' '.join(shlex.quote('/layers/'+name) for name in files)+'\n'
+                # Local file acquisition stays enabled; no repository indexes are visible.
+                +'mkdir -p /work/offline-apt/lists/partial /work/offline-apt/archives/partial /work/offline-apt/sources.list.d\n'
+                'apt-get -o Dir::Etc::sourcelist=/dev/null '
+                '-o Dir::Etc::sourceparts=/work/offline-apt/sources.list.d '
+                '-o Dir::State::lists=/work/offline-apt/lists '
+                '-o Dir::Cache::archives=/work/offline-apt/archives '
+                '--no-install-recommends -y install '
+                + ' '.join(shlex.quote(p) for p in dependencies+['/layers/'+name for name in files])+'\n'
                 'dpkg --audit > /work/layer-dpkg-audit.txt\ntest ! -s /work/layer-dpkg-audit.txt\n'
                 "dpkg-query -W -f='${Package}\\t${Version}\\t${Architecture}\\t${Status}\\n' > /work/packages.tsv\n", 0o755)
     build.proot(root, ['/usr/bin/fakeroot-tcp', '-i', '/work/layer-fakeroot.state',
                       '-s', '/work/package-fakeroot.state', '/bin/sh', '/work/install-layers.sh'],
-                [f'{work}:/work', f'{output}:/layers'])
+                bindings)
     return manifest
 
 
@@ -389,7 +488,7 @@ def install_desktop(root, work, saved, profile, cache):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['plan','fetch','pack','bundle'])
+    parser.add_argument('action', choices=['plan','fetch','fetch-board','pack','bundle'])
     parser.add_argument('--profile', choices=['server','kde','gnome'], default='kde')
     parser.add_argument('--board', default='w202ds')
     parser.add_argument('--distribution', default=build.DEFAULT)
@@ -405,12 +504,14 @@ def main():
         result = plan(args.profile)
     elif args.action == 'fetch':
         result = {'cache':str(fetch(args.profile,args.offline,args.cache))}
+    elif args.action == 'fetch-board':
+        result = {'cache':str(fetch_board(args.profile))}
     elif args.action == 'pack':
         result = pack_board(args.profile, args.context or build.profile_directory(args.profile)/'rootfs')
-        if args.profile != 'server':
+        if any(p['kind'] == 'de-common' for p in plan(args.profile)):
             result['desktop_packages'] = pack_de(args.profile)
     else:
-        result = bundle_de(args.profile, args.cache or build.distribution_build()/('apt-de-'+args.profile))
+        result = bundle_de(args.profile, args.cache or build.package_cache('apt-de-'+args.profile))
     print(json.dumps(result, indent=2))
 
 

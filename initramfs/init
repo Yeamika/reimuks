@@ -6,7 +6,11 @@ exec </dev/console >/dev/console 2>&1
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t tmpfs tmpfs /run
+progress() {
+    [ ! -x /bin/polaris-boot-watchdog ] || /bin/polaris-boot-watchdog tick "$*"
+}
 bootlog() {
+    progress "$*"
     if [ -w /dev/kmsg ]; then
         printf '<6>reimuks-init: %s\n' "$*" > /dev/kmsg
     else
@@ -16,6 +20,12 @@ bootlog() {
 bootlog 'initramfs started'
 rescue() {
     bootlog "boot stopped: $*"
+    if grep -qw reimuks.recover=1 /proc/cmdline; then
+        bootlog 'initialization failed; returning to firmware'
+        sync
+        reboot -f
+        while :;do sleep 60;done
+    fi
     bootlog 'Rescue shell on /dev/console; type exit to reboot.'
     setsid cttyhack sh
     reboot -f
@@ -23,7 +33,9 @@ rescue() {
 }
 for hook in /usr/lib/reimuks/initramfs.d/*; do
     [ -x "$hook" ] || continue
+    progress "starting ${hook##*/}"
     "$hook" || rescue "board init hook failed: ${hook##*/}"
+    progress "completed ${hook##*/}"
 done
 # EFI writes a canonical UUID plus one NUL to the DT property.
 root=
@@ -69,6 +81,7 @@ while [ "$n" -lt 60 ]; do
         *) rescue 'unsupported root selector' ;;
     esac
     [ -n "$device" ] && [ -b "$device" ] && break
+    progress "waiting for root device: $n"
     n=$((n+1))
     sleep 1
 done
@@ -85,6 +98,9 @@ bootlog "rootfs identity verified: $release"
 mount -o remount,rw /newroot || rescue 'rootfs remount failed'
 mkdir -p /newroot/dev /newroot/proc /newroot/sys /newroot/run
 bootlog 'starting rootfs init'
+if [ -x /bin/polaris-boot-watchdog ]; then
+    /bin/polaris-boot-watchdog handoff || rescue "watchdog handoff failed"
+fi
 mount --move /dev /newroot/dev
 mount --move /proc /newroot/proc
 mount --move /sys /newroot/sys

@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "id": "polaris-debian-server",
+  "board": "polaris",
+  "distribution": "debian/trixie",
+  "architecture": "arm64",
+  "layers": [
+    {
+      "id": "kernel",
+      "receipt": "kernel/polaris/package.json",
+      "producer": "devices/polaris/overlays/polaris-kernel/package.py",
+      "requires": []
+    },
+    "distro/debian/trixie/arm64/package.json",
+    {
+      "id": "powerkey",
+      "receipt": "overlays/services/arm64/powerkey/package.json",
+      "producer": "overlays/services/powerkey/package.py",
+      "requires": [
+        "distribution"
+      ]
+    },
+    {
+      "id": "polaris-hardware",
+      "receipt": "overlays/polaris/arm64/hardware/package.json",
+      "producer": "devices/polaris/overlays/polaris-hardware/package.py",
+      "requires": [
+        "kernel",
+        "distribution"
+      ]
+    },
+    {
+      "id": "polaris-server",
+      "receipt": "overlays/polaris/arm64/server/package.json",
+      "producer": "devices/polaris/overlays/polaris-server/package.py",
+      "requires": [
+        "polaris-hardware",
+        "powerkey"
+      ]
+    },
+    {
+      "id": "polaris-debian-server-adapter",
+      "receipt": "adapters/polaris/debian/trixie/arm64/server/package.json",
+      "producer": "devices/polaris/overlays/polaris-server/debian-adapter.py",
+      "requires": [
+        "kernel",
+        "distribution",
+        "powerkey",
+        "polaris-hardware",
+        "polaris-server"
+      ]
+    }
+  ]
+}

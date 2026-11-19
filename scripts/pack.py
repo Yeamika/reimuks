@@ -14,11 +14,12 @@ import sys
 import tarfile
 from build import BUILD, REPO, digest, write, proot
 import build as backend
-from tree_cleanup import remove_tree
+from tree_cleanup import remove_tree, remove_proot_placeholders
 from distributions import identity
 from fakeroot_state import snapshot, reconcile, relocate
 from startup_preflight import verify as verify_startup
 from board_userspace import install_initramfs as install_board_initramfs
+from board_userspace import validate_rootfs_inputs as validate_board_inputs
 from layers import install_packages as install_layer_packages, install_desktop
 
 
@@ -203,6 +204,11 @@ def compress_rootfs(root, work, output, profile):
 
 
 def rootfs(profile, user_overlay=None, base_only=False, from_base=False, de_cache=None):
+    with backend.profile_lock('server' if from_base else profile):
+        return _rootfs(profile, user_overlay, base_only, from_base, de_cache)
+
+
+def _rootfs(profile, user_overlay=None, base_only=False, from_base=False, de_cache=None):
     os.umask(0o022)
     if user_overlay is not None:
         raise ValueError('Package private files with user_overlay.py, then merge with the base archive')
@@ -211,13 +217,19 @@ def rootfs(profile, user_overlay=None, base_only=False, from_base=False, de_cach
         raise ValueError('Base-only requires server and cannot compose a desktop')
     if from_base and profile not in ('kde', 'gnome'):
         raise ValueError('From-base requires a desktop profile')
+    if not base_only:
+        validate_board_inputs(backend.board_directory(), profile)
     if from_base:
-        de_cache = de_cache or backend.distribution_build()/('apt-de-'+profile)
+        de_cache = de_cache or backend.package_cache('apt-de-'+profile)
         if not (de_cache/'fetch-complete.json').is_file():
             raise ValueError('Fetch the offline desktop closure first: scripts/layers.py fetch --profile '+profile)
     source_profile = 'server' if from_base else profile
     backend.check_rootfs(source_profile)
     source_root = backend.profile_directory(source_profile)/'rootfs'
+    # PRoot leaves inaccessible empty bind targets. They are build scaffolding;
+    # remove them after the guest has exited so an unprivileged cp can read the
+    # configured package tree. Payload ownership remains in fakeroot.state.
+    remove_proot_placeholders(source_root)
     status = source_root/'var/lib/dpkg/status'
     installed = {line.removeprefix('Package: ') for line in status.read_text().splitlines()
                  if line.startswith('Package: ')} if status.is_file() else set()
@@ -230,7 +242,7 @@ def rootfs(profile, user_overlay=None, base_only=False, from_base=False, de_cach
         raise SystemExit('Rootfs is not fully configured and audited')
     if not (source_work/'clean-rootfs-v1').exists():
         raise SystemExit('Legacy rootfs staging may contain old overlays; reassemble and configure from the package cache first')
-    work = backend.distribution_build()/('layers/compose-'+profile) if from_base else source_work
+    work = backend.composition_directory(profile, base_only)
     work.mkdir(parents=True, exist_ok=True)
     root = work/'package-rootfs'
     if root.is_symlink():
@@ -239,6 +251,7 @@ def rootfs(profile, user_overlay=None, base_only=False, from_base=False, de_cach
         remove_tree(root)
     # A fresh tree per pack; never merge overlays back into configured packages.
     subprocess.run(['cp', '--archive', '--reflink=auto', str(source_root), str(root)], check=True)
+    shutil.copyfile(source_work/'packages.tsv', work/'packages.tsv')
     saved = source_work/'fakeroot.state'
     staged_state = work/'package-fakeroot.state'
     if not saved.exists():
@@ -257,7 +270,7 @@ def rootfs(profile, user_overlay=None, base_only=False, from_base=False, de_cach
     shutil.copyfile(work/'normalized-fakeroot.state', staged_state)
     if from_base:
         install_desktop(root, work, staged_state, profile,
-                        de_cache or backend.distribution_build()/('apt-de-'+profile))
+                        de_cache or backend.package_cache('apt-de-'+profile))
     layer_manifest = None
     if not base_only:
         layer_manifest = install_layer_packages(root, work, staged_state, profile)
@@ -297,14 +310,14 @@ test ! -s /work/dpkg-audit.txt
 tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
  --exclude=./dev/* --exclude=./proc/* --exclude=./sys/* --exclude=./run/* \
  --exclude=./tmp/* --exclude=./host-rootfs --exclude=./packages \
- --exclude=./layers --exclude=./de-packages \
+ --exclude=./layers --exclude=./de-packages --exclude=./board-packages \
  --exclude=./usr/lib/modules --exclude=./lib/modules \
  --exclude=./boot/Image-* --exclude=./boot/config-* \
  --exclude=./usr/lib/reimuks/kernel-release --exclude=./usr/lib/reimuks/kernel-image.sha256 \
  --exclude=./usr/lib/reimuks/kernel-manifest.json \
  --exclude=./work --exclude=./output -cf - -C / .
 ''',0o755)
-    output=backend.artifact_directory()
+    output=backend.shared_distribution()/'artifacts' if base_only else backend.artifact_directory()
     output.mkdir(parents=True, exist_ok=True)
     label = 'base' if base_only else profile
     compress_rootfs(root, work, output, label)
@@ -312,7 +325,7 @@ tar --numeric-owner --sort=name --one-file-system --xattrs --acls \
     partial=dest.with_suffix(dest.suffix+'.part')
     partial.replace(dest)
     shutil.copyfile(work/'packages.tsv',output/f'{label}-packages.tsv')
-    receipt = backend.distribution_build()/f'apt-{source_profile}'/'fetch-complete.json'
+    receipt = backend.package_cache(f'apt-{source_profile}')/'fetch-complete.json'
     debs = json.loads(receipt.read_text())['archives'] if receipt.exists() else {}
     login = {}
     for line in (root/'etc/shadow').read_text().splitlines():

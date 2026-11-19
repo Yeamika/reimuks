@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "w202ds-powerkey-interface",
+  "kind": "board-display-interface",
+  "package": "package.py",
+  "policies": {
+    "board": {
+      "files": ["files"],
+      "verify": {
+        "executables": ["usr/libexec/reimuks-display-toggle"]
+      }
+    }
+  }
+}

@@ -10,7 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 DEVICES = ROOT/'devices/w202ds/kernel/Devices'
-SOURCE = ROOT/'devices/w202ds/desktop/common/device-controls/source'
+SOURCE = ROOT/'devices/w202ds/overlays/w202ds-hardwarepack2/src/device-controls/source'
 
 
 class UsbControls(unittest.TestCase):

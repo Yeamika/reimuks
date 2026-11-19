@@ -5,5 +5,6 @@ __pycache__/
 /config/accounts.local.json
 
 /devices/*/build.local.json
-/overlay/user/files/
-/overlay/apps/files/
+/devices/*/overlays/*/build.local.json
+/overlays/user/**/files/
+/overlays/user/**/*.tar.gz

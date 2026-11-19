@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "board": "polaris",
+  "profile": "desktop/server",
+  "kernel": "polaris-kernel",
+  "overlays": ["services/powerkey", "polaris-hardware", "polaris-server"],
+  "package_profile": "server",
+  "builder": "polaris-server"
+}

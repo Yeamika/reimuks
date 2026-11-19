@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "board": {
+    "selector": "board",
+    "package": "reimuks-w202ds-board",
+    "depends": [
+      "systemd",
+      "udev",
+      "libc6",
+      "libsystemd0",
+      "libudev1",
+      "python3",
+      "kmod",
+      "iproute2",
+      "bluez",
+      "wpasupplicant",
+      "modemmanager",
+      "libdrm2",
+      "libstdc++6",
+      "libwayland-client0",
+      "libzstd1",
+      "libglib2.0-0t64",
+      "libgudev-1.0-0",
+      "libpolkit-gobject-1-0"
+    ],
+    "omit": [
+      "usr/lib/udev/rules.d/80-mm-candidate.rules",
+      "usr/share/dbus-1/system.d/org.freedesktop.ModemManager1.conf",
+      "usr/share/polkit-1/actions/org.freedesktop.ModemManager1.policy"
+    ],
+    "replaces": [
+      "reimuks-w202ds-de-compat"
+    ]
+  },
+  "board-de": {
+    "selector": "board-de",
+    "package": "reimuks-w202ds-de-compat",
+    "depends": [
+      "reimuks-w202ds-board",
+      "reimuks-de-common"
+    ]
+  },
+  "profiles": {
+    "server": {
+      "selector": "board-profile",
+      "package": "reimuks-w202ds-server",
+      "depends": [
+        "reimuks-w202ds-de-compat"
+      ]
+    },
+    "kde": {
+      "selector": "board-profile",
+      "package": "reimuks-w202ds-kde",
+      "depends": [
+        "reimuks-w202ds-de-compat",
+        "reimuks-de-kde",
+        "libkf6coreaddons6",
+        "libkf6screen8",
+        "libksysguardsystemstats2",
+        "libqt6core6t64",
+        "libqt6dbus6",
+        "libqt6gui6",
+        "libqt6widgets6"
+      ],
+      "preparer_inputs": [
+        "var/lib/dpkg/status",
+        "usr/share/plasma/layout-templates/org.kde.plasma.desktop.defaultPanel",
+        "usr/share/plasma/plasmoids/org.kde.plasma.private.systemtray",
+        "usr/share/plasma/plasmoids/org.kde.plasma.battery",
+        "usr/share/plasma/plasmoids/org.kde.plasma.networkmanagement"
+      ],
+      "conflicts": [
+        "reimuks-w202ds-gnome"
+      ]
+    },
+    "gnome": {
+      "selector": "board-profile",
+      "package": "reimuks-w202ds-gnome",
+      "depends": [
+        "reimuks-w202ds-de-compat",
+        "reimuks-de-gnome",
+        "libglib2.0-bin"
+      ],
+      "omit": [
+        "etc/gdm3/daemon.conf"
+      ],
+      "conflicts": [
+        "reimuks-w202ds-kde"
+      ]
+    }
+  }
+}

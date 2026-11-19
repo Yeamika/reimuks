@@ -1,0 +1,16 @@
+[Unit]
+Description=REIMUKS configurable power-key action service
+After=systemd-udev-trigger.service
+Wants=systemd-udev-trigger.service
+ConditionPathExists=/etc/default/reimuks-powerkey
+
+[Service]
+Type=simple
+EnvironmentFile=-/usr/lib/reimuks/powerkey-board.env
+EnvironmentFile=/etc/default/reimuks-powerkey
+ExecStart=/usr/libexec/reimuks-powerkey-launch
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

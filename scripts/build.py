@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Local, unprivileged Debian ARM64 assembly. No host package installation."""
 import argparse
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import json
 import os
@@ -12,15 +14,32 @@ import sys
 from tree_cleanup import remove_tree
 from distributions import DEFAULT, load_distribution, identity, resolve_profile, sources_list, additional_repositories, repository_key, check_os_release, check_package_versions
 from accounts import load_accounts, password_operations, DEFAULT_CONFIG
+from output_paths import build_root, shared_root
 
 REPO = Path(__file__).resolve().parents[1]
-BUILD = REPO / 'build'
-TOOLS = BUILD / 'tools/root'
+BUILD = build_root()
+SHARED_BUILD = shared_root()
+TOOLS = SHARED_BUILD / 'tools/root'
 PROXY = os.environ.get('REIMUKS_DOWNLOAD_PROXY')
 MIRROR = 'https://ftp.debian.org/debian'
 PYTHON = sys.executable
-DISTRIBUTION = load_distribution(os.environ.get('REIMUKS_DISTRIBUTION', DEFAULT))
 BOARD = os.environ.get('REIMUKS_BOARD', 'w202ds')
+
+
+def board_distribution(name):
+    distribution = load_distribution(name)
+    config = json.loads((REPO/'devices'/BOARD/'board.json').read_text())
+    components = config.get('additional_apt_components', [])
+    if not isinstance(components, list) or any(
+            item not in ('main', 'contrib', 'non-free', 'non-free-firmware') for item in components):
+        raise ValueError('Invalid board APT components')
+    # The effective identity includes firmware repositories, without changing
+    # another board's distribution or invalidating its authenticated cache.
+    distribution['components'] = list(dict.fromkeys(distribution['components'] + components))
+    return distribution
+
+
+DISTRIBUTION = load_distribution(os.environ.get('REIMUKS_DISTRIBUTION', DEFAULT))
 
 
 def select_distribution(name):
@@ -29,10 +48,11 @@ def select_distribution(name):
 
 
 def select_board(name):
-    global BOARD
+    global BOARD, BUILD
     if not name.isidentifier() or not (REPO/'devices'/name/'board.json').is_file():
         raise ValueError('Unknown board: '+name)
     BOARD = name
+    BUILD = build_root(name)
 
 
 def board_directory():
@@ -40,7 +60,7 @@ def board_directory():
 
 
 def board_build():
-    return BUILD if BOARD == 'w202ds' else BUILD/'boards'/BOARD
+    return BUILD
 
 
 def kernel_directory():
@@ -54,16 +74,40 @@ def distribution_build():
 
 
 def profile_directory(profile):
-    return distribution_build()/profile.removeprefix('desktop/')
+    return shared_distribution()/'rootfs'/profile.removeprefix('desktop/')
+
+
+def composition_directory(profile, base_only=False):
+    if base_only:
+        return shared_distribution()/'pack/base'
+    return distribution_build()/'rootfs'/profile.removeprefix('desktop/')/'work'
+
+
+@contextmanager
+def profile_lock(profile):
+    directory = profile_directory(profile)
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory/'.build.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 def artifact_directory():
     return distribution_build()/'artifacts'
 
 
-def bind_distribution(directory, refresh_cache=False):
+def shared_distribution():
+    return SHARED_BUILD/'distributions'/DISTRIBUTION['id']/DISTRIBUTION['architecture']
+
+
+def package_cache(name, *, board=False):
+    root = shared_distribution()/'cache'
+    return (root/'boards'/BOARD if board else root)/name
+
+
+def bind_distribution(directory, refresh_cache=False, distribution=None):
     marker = directory/'distribution.json'
-    expected = identity(DISTRIBUTION)
+    expected = identity(distribution or DISTRIBUTION)
     if marker.is_file() and json.loads(marker.read_text()) != expected:
         if not refresh_cache:
             raise ValueError(f'Distribution configuration changed; use a fresh rootfs: {directory}')
@@ -93,20 +137,25 @@ def write(path, content, mode=None):
 
 def digest(path):
     with path.open('rb') as f:
-        return hashlib.file_digest(f, 'sha256').hexdigest()
+        if hasattr(hashlib, 'file_digest'):
+            return hashlib.file_digest(f, 'sha256').hexdigest()
+        checksum = hashlib.sha256()
+        for block in iter(lambda: f.read(1024 * 1024), b''):
+            checksum.update(block)
+        return checksum.hexdigest()
 
 
-def apt_state(name, arch, profile=None, include_apps=False):
+def apt_state(name, arch, profile=None, include_apps=False, board=False):
     # Host tools use the fixed bootstrap distro, independently of the target.
     host = name == 'apt-host'
-    distribution = load_distribution(DEFAULT) if host else DISTRIBUTION
-    state = (BUILD if host else distribution_build()) / name
+    distribution = load_distribution(DEFAULT) if host else (board_distribution(DISTRIBUTION['id']) if board else DISTRIBUTION)
+    state = SHARED_BUILD/'apt-host' if host else package_cache(name, board=board)
     for d in ('lists/partial', 'archives/partial', 'empty-parts'):
         (state / d).mkdir(parents=True, exist_ok=True)
     (state / 'status').touch()
     key = TOOLS / 'usr/share/keyrings/debian-archive-keyring.gpg'
     if not host:
-        bind_distribution(state, refresh_cache=True)
+        bind_distribution(state, refresh_cache=True, distribution=distribution)
     write(state / 'sources.list', sources_list(distribution, keyring=key, profile=profile or name.removeprefix('apt-'), include_apps=include_apps))
     config = f'''Dir::State::status "{state}/status";
 Dir::State::lists "{state}/lists";
@@ -138,7 +187,7 @@ def apt(state, *args, **kw):
 
 
 def proot_command(root, command, bindings=()):
-    args = [BUILD / 'tools/proot', '-0', '-r', root, '-w', '/',
+    args = [SHARED_BUILD / 'tools/proot', '-0', '-r', root, '-w', '/',
             '-b', '/dev', '-b', '/proc',
             '-q', TOOLS / 'usr/bin/qemu-aarch64']
     for binding in bindings:
@@ -147,6 +196,8 @@ def proot_command(root, command, bindings=()):
            if not key.startswith('XDG_') and key not in ('QT_PLUGIN_PATH', 'QML2_IMPORT_PATH')}
     env.update(HOME='/root', USER='root', LOGNAME='root', LC_ALL='C', SYSTEMD_OFFLINE='1',
                DEBIAN_FRONTEND='noninteractive', PATH='/usr/sbin:/usr/bin:/sbin:/bin')
+    # PRoot scratch stays in the host build tree; target scripts use guest /tmp.
+    env['QEMU_SET_ENV'] = ','.join(filter(None, [env.get('QEMU_SET_ENV'), 'TMPDIR=/tmp']))
     return args + command, env
 
 
@@ -157,17 +208,25 @@ def proot(root, command, bindings=(), **kwargs):
 
 def packages(profile):
     from layers import requested_packages
-    return requested_packages(profile, board_directory(), DISTRIBUTION)
+    return requested_packages(profile, distribution=DISTRIBUTION, include_board=False)
 
 
 def prepare_tools():
     bootstrap = json.loads((REPO/'config/build-tools.json').read_text())['bootstrap']
+    marker = SHARED_BUILD/'tools/host-tools.json'
+    binary = SHARED_BUILD/'tools/proot'
+    if marker.is_file() and binary.is_file() and digest(binary) == bootstrap['proot']['sha256']:
+        receipt = json.loads(marker.read_text())
+        if receipt.get('files') and all((TOOLS/name).is_file() and digest(TOOLS/name) == expected
+                                       for name, expected in receipt['files'].items()):
+            return
     keyring = bootstrap['archive_keyring']
-    key = BUILD / 'tools/downloads/debian-archive-keyring.deb'
+    key = SHARED_BUILD / 'tools/downloads/debian-archive-keyring.deb'
     if not (TOOLS / 'usr/share/keyrings/debian-archive-keyring.gpg').exists():
         key.parent.mkdir(parents=True, exist_ok=True)
-        run(['curl', *(['--noproxy', '', '--proxy', PROXY] if PROXY else []), '-fL', '--retry', '3',
-             '-o', key, keyring['url']])
+        if not key.is_file() or digest(key) != keyring['sha256']:
+            run(['curl', *(['--noproxy', '', '--proxy', PROXY] if PROXY else []), '-fL', '--retry', '3',
+                 '-o', key, keyring['url']])
         if digest(key) != keyring['sha256']:
             raise SystemExit('Debian archive keyring bootstrap digest mismatch')
         run(['dpkg-deb', '-x', key, TOOLS])
@@ -177,7 +236,7 @@ def prepare_tools():
     for deb in (state / 'archives').glob('*.deb'):
         run(['dpkg-deb', '-x', deb, TOOLS])
     # 5.1 lacks statx; 5.4 aborts on current systemd tmpfiles /proc operations.
-    binary = BUILD / 'tools/proot'
+    binary = SHARED_BUILD / 'tools/proot'
     expected = bootstrap['proot']['sha256']
     if not binary.exists() or digest(binary) != expected:
         run(['curl', *(['--noproxy', '', '--proxy', PROXY] if PROXY else []), '-fL', '--retry', '3',
@@ -186,6 +245,8 @@ def prepare_tools():
     if digest(binary) != expected:
         raise SystemExit('PRoot bootstrap digest mismatch')
     binary.chmod(0o755)
+    files = ['usr/bin/qemu-aarch64', 'usr/share/keyrings/debian-archive-keyring.gpg']
+    write(marker, json.dumps({'schema': 1, 'files': {name: digest(TOOLS/name) for name in files}}, indent=2)+'\n')
 
 
 def fetch(profile, offline=False):
@@ -317,6 +378,13 @@ def configure_locale(profile, root):
     write(root/'etc/default/locale', 'LANG='+locale+'\n')
 
 
+def configure_desktop_graphics(root):
+    # Qt's dynamic Vulkan lookup must work with the runtime loader package;
+    # libvulkan.so is a development-package link, libvulkan.so.1 is its ABI.
+    write(root / 'etc/environment.d/60-reimuks-qt-vulkan.conf',
+          'QT_VULKAN_LIB=${QT_VULKAN_LIB:-libvulkan.so.1}\n')
+
+
 def configure_display(profile, root):
     specification = resolve_profile(profile, DISTRIBUTION)
     if specification.get('display_protocol') != 'wayland':
@@ -328,21 +396,23 @@ def configure_display(profile, root):
               '[Wayland]\nCompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1\n'
               'SessionDir=/usr/share/wayland-sessions\n\n'
               '[X11]\nSessionDir=/usr/share/reimuks/disabled-xsessions\n')
-        # Debian's service explicitly passes --xwayland. Reset ExecStart so
-        # KWin never starts the compatibility server in this profile.
+        # Keep Debian's Xwayland compatibility: standard Plasma still starts
+        # X11-only helpers (including ksmserver and tray proxies). Removing it
+        # makes those helpers crash/restart even though the compositor itself
+        # remains Wayland. Replace an older generated override on rebuild.
         write(root / 'etc/systemd/user/plasma-kwin_wayland.service.d/20-reimuks-wayland.conf',
-              '[Service]\nExecStart=\nExecStart=/usr/bin/kwin_wayland_wrapper\n')
+              '[Service]\nExecStart=\nExecStart=/usr/bin/kwin_wayland_wrapper --xwayland\n')
     elif specification.get('display_manager') == 'gdm3':
         write(root / 'etc/gdm3/daemon.conf', '[daemon]\nWaylandEnable=true\n')
 
 
-def configure(profile, accounts=None):
+def configure(profile, accounts=None, *, apply_account_config=True):
     os.umask(0o022)
     accounts = accounts if accounts is not None else DEFAULT_CONFIG
     load_accounts(accounts)  # Never discover private credentials implicitly during base setup.
     check_rootfs(profile)
     root = profile_directory(profile) / 'rootfs'
-    state = distribution_build() / f'apt-{profile}'
+    state = package_cache(f'apt-{profile}')
     target = resolve_profile(profile, DISTRIBUTION)['target']
     write(root/'usr/sbin/policy-rc.d', '#!/bin/sh\nexit 101\n', 0o755)
     write(root/'etc/apt/sources.list', sources_list(DISTRIBUTION, target=True, profile=profile))
@@ -400,10 +470,13 @@ dpkg-query -W -f='${Package}\\t${Version}\\t${Architecture}\\t${Status}\\n' > /w
     restore = ['-i', '/work/fakeroot.state'] if saved.exists() else []
     proot(root, ['/usr/bin/fakeroot-tcp', *restore, '-s', '/work/fakeroot.state', '/bin/sh', '/work/configure.sh'],
           [f'{state}/archives:/packages', f'{work}:/work'])
+    if resolve_profile(profile, DISTRIBUTION).get('display_protocol') == 'wayland':
+        configure_desktop_graphics(root)
     configure_display(profile, root)
     from acceleration import install as install_acceleration
     install_acceleration(root, profile, DISTRIBUTION)
-    apply_accounts(profile, accounts)
+    if apply_account_config:
+        apply_accounts(profile, accounts)
     (work / 'configured').touch()
 
 
@@ -430,7 +503,7 @@ def main():
     elif args.action == 'fetch':
         fetch(args.profile, offline=args.offline)
     elif args.action == 'assemble':
-        assemble(args.profile, distribution_build() / f'apt-{args.profile}')
+        assemble(args.profile, package_cache(f'apt-{args.profile}'))
     elif args.action == 'configure':
         configure(args.profile, args.accounts)
     elif args.action == 'accounts':

@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 import pack as rootfs_pack
+import rootfs_target
 import user_overlay
 from verify import verify_base_metadata
 from tree_cleanup import remove_tree
@@ -94,11 +95,32 @@ class CleanPackaging(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError,'bare locked'):
                 verify_base_metadata({}, passwords.replace('root:!:', 'root:'+password+':'))
 
+    def test_clean_preset_checks_inputs_before_discarding_old_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            board_root = Path(tmp)
+            output = board_root/'artifacts/targets/example-rootfs.tar.gz'
+            output.parent.mkdir(parents=True)
+            output.write_bytes(b'old image')
+            pool = board_root/'packages'
+            cached = board_root/'download-cache/example.deb'
+            cached.parent.mkdir()
+            cached.write_bytes(b'download')
+            recipe = board_root/'example.json'
+            with patch.object(rootfs_target, 'resolve_layers', side_effect=ValueError('missing input')):
+                with self.assertRaisesRegex(ValueError, 'missing input'):
+                    rootfs_target.assemble(recipe, pool, output, device_root=board_root, clean=True)
+            self.assertEqual(output.read_bytes(), b'old image')
+            output.unlink()
+            output.symlink_to(cached)
+            with self.assertRaisesRegex(ValueError, 'regular rootfs archive'):
+                rootfs_target.assemble(recipe, pool, output, device_root=board_root, clean=True)
+            self.assertEqual(cached.read_bytes(), b'download')
+
     def test_legacy_contaminated_staging_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);work=base/'work';work.mkdir()
             (work/'configured').touch();(work/'dpkg-audit.txt').touch()
-            with patch.object(rootfs_pack.backend,'check_rootfs'),patch.object(rootfs_pack.backend,'profile_directory',return_value=base):
+            with patch.object(rootfs_pack,'validate_board_inputs'),patch.object(rootfs_pack.backend,'check_rootfs'),patch.object(rootfs_pack.backend,'profile_directory',return_value=base):
                 with self.assertRaisesRegex(SystemExit,'reassemble'):
                     rootfs_pack.rootfs('kde')
 

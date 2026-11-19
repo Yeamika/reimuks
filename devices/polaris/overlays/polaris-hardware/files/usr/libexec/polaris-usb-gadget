@@ -1,0 +1,45 @@
+#!/bin/sh
+# Serial transport only. Never exports or writes storage partitions.
+set -eu
+if [ -r /proc/device-tree/compatible ]; then
+    tr '\000' '\n' </proc/device-tree/compatible | grep -qx 'xiaomi,polaris' || exit 1
+fi
+mkdir -p /sys/kernel/config
+if ! grep -q ' /sys/kernel/config configfs ' /proc/mounts; then
+    mount -t configfs configfs /sys/kernel/config
+fi
+base=/sys/kernel/config/usb_gadget/polaris
+if [ -r "$base/UDC" ] && [ -n "$(cat "$base/UDC")" ]; then exit 0; fi
+for other in /sys/kernel/config/usb_gadget/*/UDC; do
+    [ -e "$other" ] || continue
+    [ -z "$(cat "$other")" ] || { echo 'Another USB gadget owns the controller' >&2; exit 1; }
+done
+mkdir -p "$base"
+printf 0x1d6b >"$base/idVendor"
+printf 0x0104 >"$base/idProduct"
+printf 0x0200 >"$base/bcdUSB"
+printf 0xef >"$base/bDeviceClass"
+printf 0x02 >"$base/bDeviceSubClass"
+printf 0x01 >"$base/bDeviceProtocol"
+mkdir -p "$base/strings/0x409"
+printf polaris-reimuks >"$base/strings/0x409/serialnumber"
+printf REIMUKS >"$base/strings/0x409/manufacturer"
+printf 'Polaris Linux console' >"$base/strings/0x409/product"
+mkdir -p "$base/configs/c.1/strings/0x409" "$base/functions/acm.GS0"
+printf 'Linux serial console' >"$base/configs/c.1/strings/0x409/configuration"
+printf 500 >"$base/configs/c.1/MaxPower"
+[ -e "$base/configs/c.1/acm.GS0" ] || ln -s "$base/functions/acm.GS0" "$base/configs/c.1/acm.GS0"
+n=0
+while [ "$n" -lt 20 ]; do
+    for udc in /sys/class/udc/*; do
+        [ -e "$udc" ] || continue
+        printf '%s' "${udc##*/}" >"$base/UDC"
+        echo 'POLARIS_INITRAMFS: USB ACM ready'
+        exit 0
+    done
+    [ ! -x /bin/polaris-boot-watchdog ] || /bin/polaris-boot-watchdog tick wait-usb-controller
+    sleep 1
+    n=$((n+1))
+done
+echo 'USB controller did not appear' >&2
+exit 1

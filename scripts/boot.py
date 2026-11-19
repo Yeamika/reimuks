@@ -4,11 +4,13 @@ import argparse
 import fcntl
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 from verify_boot import verify
+from output_paths import boot_paths, temporary_environment
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -76,7 +78,8 @@ def build_board(board, directory, config, stage, output, source_cache=None, jobs
     boot = (directory/'boot').resolve()
     if boot not in builder.parents or not builder.is_file():
         raise ValueError('board boot builder must exist inside the linked boot project')
-    work = REPO/'build/boot'/board
+    work, _, default_cache = boot_paths(board, repo=REPO)
+    source_cache = source_cache or default_cache
     output = output.resolve()
     if output == work.resolve() or work.resolve() in output.parents or output in work.resolve().parents:
         raise ValueError('artifact directory must be separate from the boot work directory')
@@ -94,7 +97,11 @@ def build_board(board, directory, config, stage, output, source_cache=None, jobs
         default_inputs = directory/'boot-inputs.local.json'
         if stage != 'efi' and (inputs or default_inputs.is_file()):
             argv += ['--inputs', str((inputs or default_inputs).resolve())]
-        subprocess.run(argv, check=True)
+        env = temporary_environment(work.parent)
+        env.setdefault('CARGO_HOME', str(work.parent/'cargo'))
+        # Set defaults only for this invocation, leaving the shared runtime free
+        # to choose its own outputs when used by another platform.
+        subprocess.run(argv, check=True, env=env)
         publish(work, output)
         shutil.rmtree(work)
     print('Boot artifacts: '+str(output))
@@ -106,7 +113,8 @@ def main():
     p.add_argument('action', choices=['list', 'build'])
     p.add_argument('--board', choices=sorted(registry))
     p.add_argument('--stage', choices=['all', 'uefi', 'efi'], default='all')
-    p.add_argument('--output', type=Path, help='artifact directory; default: build/artifacts/<board>/boot')
+    p.add_argument('--output', type=Path, help='artifact directory; default: <board-build>/artifacts/boot')
+    p.add_argument('--build-root', type=Path, help='board build directory; shared downloads remain in build/')
     p.add_argument('--source-cache', type=Path)
     p.add_argument('--jobs', type=int, default=4)
     p.add_argument('--inputs', type=Path, help='board-local boot packaging input JSON')
@@ -118,7 +126,9 @@ def main():
     if not a.board or a.jobs < 1:
         p.error('build requires --board and positive --jobs')
     directory, config = registry[a.board]
-    output = a.output or REPO/'build/artifacts'/a.board/'boot'
+    if a.build_root:
+        os.environ['REIMUKS_BUILD_ROOT'] = str(a.build_root.expanduser().resolve())
+    output = a.output or boot_paths(a.board, repo=REPO)[1]
     try:
         build_board(a.board, directory, config, a.stage, output, a.source_cache, a.jobs, a.inputs)
     except (OSError, ValueError, subprocess.SubprocessError) as error:

@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "desktop-server-common",
+  "kind": "shared-server-console-policy",
+  "policies": {
+    "server-common": {
+      "files": [
+        "files"
+      ],
+      "verify": {
+        "files": [
+          "etc/systemd/logind.conf.d/50-reimuks-powerkey.conf",
+          "etc/default/reimuks-powerkey"
+        ]
+      },
+      "services": {
+        "multi-user.target.wants/reimuks-powerkey.service": "reimuks-powerkey.service",
+        "multi-user.target.wants/reimuks-console-login.service": "reimuks-console-login.service"
+      },
+      "disable": [
+        "multi-user.target.wants/systemd-networkd.service"
+      ]
+    }
+  },
+  "package": "package.py"
+}

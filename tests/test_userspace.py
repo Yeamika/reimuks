@@ -22,8 +22,9 @@ class UserspaceIntegrationTest(unittest.TestCase):
         self.artifacts = Path(self.directory.name) / 'desktop-artifacts'
         header = b'\x7fELF\x02\x01' + b'\0' * 12 + b'\xb7\x00'
         import json
-        policy = json.loads((ROOT / 'devices/w202ds/rootfs/policy.json').read_text())
-        for layer in [policy['desktop_common'], *policy['profiles'].values()]:
+        layers = [layer for profile in ('server', 'kde', 'gnome')
+                  for layer in board_userspace.policy_layers(ROOT / 'devices/w202ds', profile)]
+        for layer in layers:
             for artifact in layer.get('rootfs_artifacts', []):
                 for filename in artifact['required_elf']:
                     binary = self.artifacts / artifact['rootfs'] / filename
@@ -40,13 +41,19 @@ class UserspaceIntegrationTest(unittest.TestCase):
 
     def exports(self, board):
         import json
+        config_path = board / 'board.json'
+        config = json.loads(config_path.read_text()) if config_path.is_file() else {}
+        board_id = config.get('board', 'test-board')
         hardware = board / 'kernel'
         components = {p.parent.name: {'userspace': str(p.relative_to(hardware))}
                       for p in hardware.glob('Devices/*/userspace')}
         (hardware / 'board-userspace.json').write_text(json.dumps({
-            'schema': 1, 'board': 'test-board', 'components': components}))
-        (board / 'board.json').write_text(json.dumps({
-            'board': 'test-board', 'architecture': 'arm64', 'userspace_manifest': 'kernel/board-userspace.json'}))
+            'schema': 1, 'board': board_id, 'components': components}))
+        config.update({
+            'board': board_id, 'architecture': 'arm64',
+            'userspace_manifest': 'kernel/board-userspace.json'
+        })
+        config_path.write_text(json.dumps(config))
 
     def stage(self, profile):
         install_rootfs(self.root, profile)
@@ -99,7 +106,8 @@ class UserspaceIntegrationTest(unittest.TestCase):
     def test_generated_board_artifacts_inherited_and_required(self):
         import json
         board = Path(self.directory.name) / 'board'
-        shutil.copytree(ROOT / 'devices/w202ds/rootfs', board / 'rootfs')
+        shutil.copytree(ROOT / 'devices/w202ds/overlays', board / 'overlays')
+        shutil.copy2(ROOT / 'devices/w202ds/board.json', board / 'board.json')
         source = board / 'kernel/Devices/gpu/userspace'
         (source / 'rootfs').mkdir(parents=True)
         artifact = source / 'output/rootfs/usr/share/vulkan/icd.d/panfrost_icd.json'
@@ -108,12 +116,11 @@ class UserspaceIntegrationTest(unittest.TestCase):
         (source / 'artifacts.json').write_text(json.dumps({
             'schema': 1, 'rootfs': 'output/rootfs',
             'required': ['usr/share/vulkan/icd.d/panfrost_icd.json']}))
-        policy = json.loads((board / 'rootfs/policy.json').read_text())
-        policy['common']['components'] = []
-        policy['common']['components'] = ['gpu']
-        policy['desktop_common']['components'] = []
-        policy['profiles']['desktop/server'].pop('components', None)
-        (board / 'rootfs/policy.json').write_text(json.dumps(policy))
+        policy_file = board / 'overlays/w202ds-hardwarepack2/layer.json'
+        policy = json.loads(policy_file.read_text())
+        policy['policies']['board']['components'] = ['gpu']
+        policy['policies']['board-de']['components'] = []
+        policy_file.write_text(json.dumps(policy))
         modules = self.root / 'usr/lib/modules/test/kernel'
         modules.mkdir(parents=True)
         (modules / 'panfrost.ko').touch()
@@ -174,7 +181,7 @@ class UserspaceIntegrationTest(unittest.TestCase):
         self.assertFalse((self.root / 'usr/share/kwin').exists())
 
     def test_shared_controls_and_services_are_identical_across_desktops(self):
-        for profile in ('kde', 'gnome'):
+        for profile in ('server', 'kde', 'gnome'):
             with self.subTest(profile=profile):
                 target = Path(self.directory.name) / profile
                 target.mkdir()
@@ -183,10 +190,10 @@ class UserspaceIntegrationTest(unittest.TestCase):
                     self.assertTrue(os.access(target / 'usr/libexec' / ('w202-' + name), os.X_OK))
                 self.assertTrue((target / 'usr/lib/systemd/system/w202-hall-input.service').exists())
                 self.assertTrue((target / 'usr/lib/systemd/system/w202-gnss.service').exists())
+                self.assertTrue((target / 'etc/systemd/system/multi-user.target.wants/iio-sensor-proxy.service').is_symlink())
+                self.assertTrue((target / 'usr/lib/tmpfiles.d/w202ds-modem.conf').is_file())
                 self.assertEqual((target / 'usr/libexec/w202-hardware-controls').exists(), profile == 'kde')
                 self.assertEqual((target / 'usr/libexec/w202-tablet-mode').exists(), profile == 'kde')
-        self.stage('server')
-        self.assertFalse((self.root / 'usr/libexec/w202-device-controls').exists())
 
     def test_missing_or_wrong_architecture_controls_fail_before_staging(self):
         binary = self.artifacts / 'device-controls/rootfs/usr/libexec/w202-device-controls'
@@ -199,6 +206,28 @@ class UserspaceIntegrationTest(unittest.TestCase):
             self.stage('kde')
         self.assertFalse(list(self.root.iterdir()))
 
+    def test_each_desktop_stages_without_the_other_desktops_outputs(self):
+        for selected, other in (('gnome', 'kde'), ('kde', 'gnome')):
+            with self.subTest(profile=selected):
+                other_output = self.artifacts / ('desktop-' + other)
+                saved = other_output.with_name(other_output.name + '-unavailable')
+                other_output.rename(saved)
+                try:
+                    target = Path(self.directory.name) / ('isolated-' + selected)
+                    target.mkdir()
+                    install_rootfs(target, selected)
+                    self.assertTrue((target / 'usr/libexec/w202-device-controls').is_file())
+                    self.assertEqual((target / 'usr/libexec/w202-gnome-controls').exists(), selected == 'gnome')
+                    self.assertEqual((target / 'usr/libexec/w202-hardware-controls').exists(), selected == 'kde')
+                finally:
+                    saved.rename(other_output)
+
+    def test_hall_and_torch_hardware_tools_belong_to_the_board_package(self):
+        install_rootfs(self.root, 'gnome', only='board')
+        for name in ('w202-hall-input', 'w202-torch-control'):
+            self.assertTrue((self.root / 'usr/libexec' / name).is_file())
+        self.assertFalse((self.root / 'usr/libexec/w202-device-controls').exists())
+        self.assertFalse((self.root / 'usr/libexec/w202-gnome-controls').exists())
     def test_graphical_profiles_use_wayland_login(self):
         self.stage('gnome')
         config = (self.root / 'etc/gdm3/daemon.conf').read_text()
@@ -212,7 +241,7 @@ class UserspaceIntegrationTest(unittest.TestCase):
         self.assertIn('[X11]\nSessionDir=/usr/share/reimuks/no-x11-sessions', config)
         self.assertFalse(list((self.root / 'usr/share/reimuks/no-x11-sessions').glob('*.desktop')))
 
-    def test_server_without_audio(self):
+    def test_server_reuses_public_interfaces_without_a_graphical_session(self):
         self.stage('server')
         for name in ('w202-usb-gadget', 'w202-display-prepare', 'w202-display-login'):
             self.assertTrue(os.access(self.root / 'usr/libexec' / name, os.X_OK))
@@ -220,8 +249,15 @@ class UserspaceIntegrationTest(unittest.TestCase):
         wants = self.root / 'etc/systemd/system/multi-user.target.wants'
         self.assertEqual((wants / 'w202-display-login.service').readlink(),
                          Path('/usr/lib/systemd/system/w202-display-login.service'))
-        self.assertTrue((wants / 'systemd-networkd.service').is_symlink())
+        self.assertFalse((wants / 'systemd-networkd.service').is_symlink())
         self.assertFalse((wants / 'w202-hall.service').is_symlink())
+        self.assertTrue((wants / 'w202-hall-input.service').is_symlink())
+        self.assertTrue((wants / 'ModemManager.service').is_symlink())
+        self.assertIn('switch_code=-1', (self.root / 'etc/modprobe.d/w202-hall.conf').read_text())
+        for name in ('w202-device-controls', 'w202-usb-settings', 'w202-gnss-control'):
+            self.assertTrue(os.access(self.root / 'usr/libexec' / name, os.X_OK))
+        for name in ('w202-hardware-controls', 'w202-gnome-controls', 'w202-rotation'):
+            self.assertFalse((self.root / 'usr/libexec' / name).exists())
         lid = self.root / 'etc/systemd/logind.conf.d/60-w202-lid.conf'
         self.assertIn('HandleLidSwitch=ignore', lid.read_text())
 
@@ -249,13 +285,18 @@ class UserspaceIntegrationTest(unittest.TestCase):
                 self.assertIn('Environment=CHARGE_BEHAVIOUR=inhibit-charge', unit.read_text())
                 self.assertIn('CHARGE_BEHAVIOUR=auto',
                               (self.root / 'etc/default/w202-charging').read_text())
-                enabled = self.root / 'etc/systemd/system/multi-user.target.wants/w202-charging.service'
-                self.assertEqual(enabled.readlink(), Path('/usr/lib/systemd/system/w202-charging.service'))
+                enabled = self.root / 'etc/systemd/system/timers.target.wants/w202-charging.timer'
+                self.assertEqual(enabled.readlink(), Path('/usr/lib/systemd/system/w202-charging.timer'))
+                self.assertFalse((self.root / 'etc/systemd/system/multi-user.target.wants/w202-charging.service').exists())
+                self.assertIn('Type=oneshot', unit.read_text())
+                timer = self.root / 'usr/lib/systemd/system/w202-charging.timer'
+                self.assertIn('Unit=w202-charging.service', timer.read_text())
+                self.assertIn('OnBootSec=0', timer.read_text())
 
     def test_charging_userspace_is_independent_of_installed_kernel(self):
         self.stage('desktop/server')
         self.assertTrue((self.root / 'usr/libexec/w202-charging').exists())
-        self.assertTrue((self.root / 'etc/systemd/system/multi-user.target.wants/w202-charging.service').is_symlink())
+        self.assertTrue((self.root / 'etc/systemd/system/timers.target.wants/w202-charging.timer').is_symlink())
 
     def test_kde_keeps_usb_without_server_console_or_networkd(self):
         networkd = self.root / 'etc/systemd/system/multi-user.target.wants/systemd-networkd.service'
@@ -281,6 +322,26 @@ class UserspaceIntegrationTest(unittest.TestCase):
         self.assertIn('options w202_hall switch_code=-1', mapping.read_text())
         self.assertTrue((self.root / 'usr/share/kwin/scripts/w202ds-tablet-keyboard/metadata.json').is_file())
 
+    def test_server_hall_overlay_is_required_and_server_only(self):
+        for profile in ('server', 'kde', 'gnome'):
+            with self.subTest(profile=profile):
+                target = Path(self.directory.name) / ('hall-' + profile)
+                target.mkdir()
+                install_rootfs(target, profile)
+                enabled = target / 'etc/systemd/system/multi-user.target.wants/w202-server-hall.service'
+                binary = target / 'usr/libexec/w202-server-hall'
+                unit = target / 'usr/lib/systemd/system/w202-server-hall.service'
+                self.assertEqual(enabled.is_symlink(), profile == 'server')
+                self.assertEqual(binary.is_file(), profile == 'server')
+                self.assertEqual(unit.is_file(), profile == 'server')
+                if profile == 'server':
+                    self.assertIn('DefaultDependencies=no', unit.read_text())
+                    self.assertIn('After=basic.target multi-user.target', unit.read_text())
+        artifact = self.artifacts / 'server-hall/rootfs/usr/libexec/w202-server-hall'
+        artifact.unlink()
+        with self.assertRaisesRegex(ValueError, 'Missing board integration executable'):
+            install_rootfs(self.root, 'server')
+
     def test_rootfs_does_not_inspect_or_require_kernel_modules(self):
         self.stage('desktop/server')
         self.assertFalse((self.root / 'usr/lib/modules').exists())
@@ -297,22 +358,24 @@ class UserspaceIntegrationTest(unittest.TestCase):
 
     def test_reimuks_overrides_component_defaults(self):
         board = Path(self.directory.name) / 'board'
-        shutil.copytree(ROOT / 'devices/w202ds/rootfs', board / 'rootfs')
+        shutil.copytree(ROOT / 'devices/w202ds/overlays', board / 'overlays')
+        shutil.copy2(ROOT / 'devices/w202ds/board.json', board / 'board.json')
         components = ROOT / 'devices/w202ds/kernel/Devices'
         for name in ('usb3', 'drm'):
             shutil.copytree(components / name / 'userspace/rootfs',
                             board / 'kernel/Devices' / name / 'userspace/rootfs')
         relative = 'usr/libexec/w202-usb-gadget'
-        default = board / 'rootfs/common' / relative
+        default = board / 'overlays/w202ds-hardwarepack2/files/common' / relative
         default.parent.mkdir(parents=True, exist_ok=True)
         default.write_text('common override\n')
-        override = board / 'rootfs/profiles/desktop/server' / relative
+        override = board / 'overlays/w202ds-server/files/server' / relative
         override.parent.mkdir(parents=True, exist_ok=True)
         override.write_text('profile override\n')
         import json
-        policy_file = board / 'rootfs/policy.json'
+        policy_file = board / 'overlays/w202ds-hardwarepack2/layer.json'
         data = json.loads(policy_file.read_text())
-        data['common']['components'] = ['usb3', 'drm']
+        data['policies']['board']['components'] = ['usb3', 'drm']
+        data['policies']['board-de']['components'] = []
         policy_file.write_text(json.dumps(data))
         self.exports(board)
         install_rootfs(self.root, 'desktop/server', board)
@@ -326,7 +389,7 @@ class UserspaceIntegrationTest(unittest.TestCase):
         self.assertEqual(installed.read_bytes(), source.read_bytes())
         self.assertTrue(os.access(installed, os.X_OK))
         self.assertEqual((self.root / 'etc/default/w202-usb-gadget').read_bytes(),
-                         (board / 'rootfs/common/etc/default/w202-usb-gadget').read_bytes())
+                         (board / 'overlays/w202ds-hardwarepack2/files/common/etc/default/w202-usb-gadget').read_bytes())
         hook = self.root / 'usr/lib/reimuks/initramfs.d/20-hardware'
         self.assertTrue(os.access(hook, os.X_OK))
         self.assertNotIn('voltage_offset_uv', (ROOT / 'initramfs/init').read_text())
@@ -339,10 +402,22 @@ class UserspaceIntegrationTest(unittest.TestCase):
     def test_wcn_recovery_policy_with_fake_hardware(self):
         board = ROOT / 'devices/w202ds'
         shutil.copytree(board / 'kernel/Devices/wcn/userspace/rootfs', self.root, dirs_exist_ok=True)
-        shutil.copytree(board / 'rootfs/optional/wcn', self.root, dirs_exist_ok=True)
+        shutil.copytree(board / 'overlays/w202ds-hardwarepack2/files/optional-wcn', self.root, dirs_exist_ok=True)
+        shutil.copytree(board / 'overlays/w202ds-hardwarepack2/files/common', self.root, dirs_exist_ok=True)
         subprocess.run([sys.executable, '-B', str(board / 'tests/wcn-recovery.py'),
                         str(self.root), str(Path(self.directory.name) / 'wcn-tests')], check=True)
 
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ModemBringupOrdering(unittest.TestCase):
+    def test_cold_boot_probes_after_board_start_without_hardware_requirement(self):
+        import configparser
+        policy = configparser.ConfigParser(interpolation=None, strict=False)
+        from board_exports import component
+        board = Path(__file__).resolve().parents[1]/'devices/w202ds'
+        policy.read(component(board, 'modem')/'rootfs/etc/systemd/system/ModemManager.service.d/10-w202-runtime-order.conf')
+        self.assertIn('w202-modem-runtime.service', policy['Unit']['After'].split())
+        self.assertFalse(any(key in policy['Unit'] for key in ('Requires', 'Requisite', 'BindsTo', 'Wants')))

@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "board": "w202ds",
+  "profile": "desktop/gnome",
+  "kernel": "w202ds-kernel",
+  "overlays": ["w202ds-hardwarepack2", "services/powerkey", "w202ds-gnome-hardwareuipack"],
+  "package_profile": "gnome",
+  "builder": "w202ds-hardwarepack2"
+}

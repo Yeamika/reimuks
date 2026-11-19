@@ -7,17 +7,19 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from output_paths import shared_root
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = ROOT/'build'
+BUILD = shared_root()
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--proxy', default=os.environ.get('REIMUKS_DOWNLOAD_PROXY'))
     p.add_argument('--config', type=Path, default=ROOT/'config/build-tools.json')
+    p.add_argument('--offline', action='store_true', help='reuse an existing compiler and Rust toolchain without downloading')
     p.add_argument('--rust-dist-server', default='https://static.rust-lang.org')
-    p.add_argument('--edk2', type=Path, default=ROOT/'devices/w202ds/boot/pocketjs4edk2_uefi/components/edk2-ums9620/edk2')
+    p.add_argument('--edk2', type=Path, default=ROOT/'devices/w202ds/boot/components/edk2-ums9620/edk2')
     a = p.parse_args()
     settings = json.loads(a.config.read_text())
     def run(*argv, env=None):
@@ -26,7 +28,10 @@ def main():
     for name in ['archives/partial','lists/partial','empty-parts']:
         (state/name).mkdir(parents=True,exist_ok=True)
     (state/'status').touch()
-    (state/'sources.list').write_text('deb https://ftp.debian.org/debian '+settings['host_suite']+' main\n')
+    mirror = settings.get('host_mirror', 'https://deb.debian.org/debian')
+    key = BUILD/'tools/root/usr/share/keyrings/debian-archive-keyring.gpg'
+    signature = f' [signed-by={key}]' if key.is_file() else ''
+    (state/'sources.list').write_text('deb'+signature+' '+mirror+' '+settings['host_suite']+' main\n')
     config = state/'apt.conf'
     config.write_text(f'''Dir::State::status "{state}/status";
 Dir::State::lists "{state}/lists";
@@ -45,12 +50,18 @@ Acquire::Retries "3";
 #clear APT::Update::Post-Invoke-Success;
 #clear DPkg::Post-Invoke;
 ''')
-    run('apt-get','-c',config,'update')
-    run('apt-get','-c',config,'--download-only','--no-install-recommends','-y','install',
-        *settings['packages'])
     compiler = BUILD/'compiler/root'
-    for deb in sorted((state/'archives').glob('*.deb')):
-        run('dpkg-deb','-x',deb,compiler)
+    if a.offline:
+        if not (compiler/'usr/bin/aarch64-linux-gnu-gcc').exists():
+            p.error('offline mode requires the existing compiler/root toolchain')
+        if not (BUILD/'rustup/toolchains'/(settings['rust_toolchain']+'-x86_64-unknown-linux-gnu')).is_dir():
+            p.error('offline mode requires the configured Rust toolchain')
+    else:
+        run('apt-get','-c',config,'update')
+        run('apt-get','-c',config,'--download-only','--no-install-recommends','-y','install',
+            *settings['packages'])
+        for deb in sorted((state/'archives').glob('*.deb')):
+            run('dpkg-deb','-x',deb,compiler)
     runtime = BUILD/'compiler/runtime'
     runtime.mkdir(parents=True,exist_ok=True)
     skip = ('libc.','libm.','libpthread.','libdl.','librt.','ld-', 'libresolv.',
@@ -68,29 +79,98 @@ Acquire::Retries "3";
         dest.symlink_to(target)
     for name in ['python','python3']:
         link(name,Path(sys.executable).resolve())
-    link('make',compiler/'usr/bin/make')
+    host_path = '/usr/local/bin:/usr/bin:/bin'
+    def host_tool(name):
+        return shutil.which(name, path=host_path)
+    link('make', host_tool('make') or compiler/'usr/bin/make')
     def versioned(prefix):
         matches = [p for p in (compiler/'usr/bin').glob(prefix+'-*')
-                   if p.name.rsplit('-', 1)[-1].isdigit()]
+                   if p.name[len(prefix) + 1:].isdigit()]
         if not matches:
             raise SystemExit('Missing compiler: '+prefix)
         return max(matches, key=lambda p: int(p.name.rsplit('-', 1)[-1]))
     commands = {}
+    host_libs = BUILD/'boot-tools/host-libs'
+    host_libs.mkdir(parents=True, exist_ok=True)
+    uuid = next((path for path in (
+        Path('/usr/lib/x86_64-linux-gnu/libuuid.so.1'),
+        Path('/lib/x86_64-linux-gnu/libuuid.so.1'),
+    ) if path.is_file()), None)
+    if uuid is not None:
+        dest = host_libs/'libuuid.so'
+        if dest.is_symlink() or dest.exists():
+            dest.unlink()
+        dest.symlink_to(uuid)
+    loader = next((path for path in (
+        compiler/'lib/x86_64-linux-gnu/ld-linux-x86-64.so.2',
+        compiler/'usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2',
+    ) if path.is_file()), None)
+    if loader is None:
+        raise SystemExit('Missing dynamic loader in compiler/root')
+    libraries = str(compiler/'usr/lib/x86_64-linux-gnu')+':'+str(compiler/'lib/x86_64-linux-gnu')
+    backend = BUILD/'boot-tools/cross-runtime'
+    backend.mkdir(parents=True, exist_ok=True)
+    cross_version = versioned('aarch64-linux-gnu-gcc').name.rsplit('-', 1)[-1]
+    gcc_lib = compiler/'usr/lib/gcc-cross/aarch64-linux-gnu'/cross_version
+    def wrapper(path, content):
+        temporary = path.with_name(path.name+'.tmp')
+        temporary.write_text(content)
+        temporary.chmod(0o755)
+        temporary.replace(path)
+    # GCC's LTO plugin launches lto-wrapper, which in turn launches GCC/lto1.
+    # -wrapper alone misses those nested execs. Give GCC executable shims via
+    # -B and retain the public GCC wrapper as argv[0] for COLLECT_GCC.
+    for name in ('cc1', 'cc1plus', 'collect2', 'lto-wrapper', 'lto1', 'as', 'ld'):
+        target = (compiler/'usr/aarch64-linux-gnu/bin'/name if name in ('as', 'ld')
+                  else gcc_lib/name)
+        if target.is_file():
+            wrapper(backend/name, f'#!/bin/sh\nexec "{loader}" --library-path "{libraries}" "{target}" "$@"\n')
     for name, prefix in [('gcc','gcc'),('cc','gcc'),('g++','g++'),('c++','g++')]:
-        commands[name] = (versioned(prefix), f'--sysroot="{compiler}" -B"{compiler}/usr/bin/"')
+        # Build host programs against the running host's libc. Debian cross
+        # tools may require a newer libc than the host; execute those below
+        # with their own loader, without exporting that libc into host tools.
+        native = host_tool(prefix)
+        if not native:
+            raise SystemExit('Missing native host compiler: '+prefix)
+        commands[name] = (Path(native), '-B"'+str(Path(native).parent)+'/" '
+                          f'-idirafter "{compiler}/usr/include" -L"{host_libs}"')
     commands.update({name:(compiler/'usr/bin'/name,'') for name in ['ar','ld','objcopy','objdump','nm','ranlib','strip','pkg-config','msgfmt','xsltproc','ninja']})
     commands.update({name:(compiler/'usr'/('sbin' if name.endswith('.fat') else 'bin')/name, '')
                      for name in ['mkfs.fat','fsck.fat','mcopy','mtype']})
     for target in (compiler/'usr/bin').glob('aarch64-linux-gnu-*'):
+        original_name = target.name
         extra = ''
-        if target.name.removeprefix('aarch64-linux-gnu-').split('-')[0] in ('gcc', 'g++', 'cpp'):
-            version = versioned('aarch64-linux-gnu-gcc').name.rsplit('-', 1)[-1]
-            extra = f'-B"{compiler}/usr/aarch64-linux-gnu/bin/" -B"{compiler}/usr/lib/gcc-cross/aarch64-linux-gnu/{version}/"'
-        commands[target.name]=(target,extra)
+        suffix = target.name.removeprefix('aarch64-linux-gnu-')
+        driver = suffix in ('gcc', 'g++', 'cpp') or any(
+            suffix.startswith(prefix+'-') and suffix[len(prefix)+1:].isdigit()
+            for prefix in ('gcc', 'g++', 'cpp'))
+        if driver:
+            extra = f'-B"{backend}/" -B"{compiler}/usr/aarch64-linux-gnu/bin/" -B"{gcc_lib}/"'
+        # gcc-ar/nm/ranlib otherwise exec an unwrapped binutils helper,
+        # losing the private loader's library search path. Invoke the same
+        # helper with GCC's LTO plugin through the regular loader wrapper.
+        lto_tool = next((name for name in ('ar', 'nm', 'ranlib')
+                        if suffix == 'gcc-'+name or
+                        suffix.startswith('gcc-'+name+'-') and
+                        suffix[len('gcc-'+name)+1:].isdigit()), None)
+        if lto_tool:
+            target = compiler/'usr/bin'/('aarch64-linux-gnu-'+lto_tool)
+            extra = f'--plugin="{gcc_lib}/liblto_plugin.so"'
+        commands[original_name]=(target,extra)
     for name,(target,extra) in commands.items():
         file=bin/name
-        file.write_text(f'#!/bin/sh\nexport LD_LIBRARY_PATH="{runtime}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"\nexec "{target}" {extra} "$@"\n')
-        file.chmod(0o755)
+        if file.is_symlink():
+            file.unlink()
+        if target.is_relative_to(compiler):
+            suffix = name.removeprefix('aarch64-linux-gnu-')
+            gcc_driver = suffix in ('gcc', 'g++', 'cpp') or any(
+                suffix.startswith(prefix+'-') and suffix[len(prefix)+1:].isdigit()
+                for prefix in ('gcc', 'g++', 'cpp'))
+            argv0 = '--argv0 "$0" ' if gcc_driver else ''
+            command = f'"{loader}" --library-path "{libraries}" {argv0}"{target}"'
+        else:
+            command = f'"{target}"'
+        wrapper(file, f'#!/bin/sh\nexec {command} {extra} "$@"\n')
     env = dict(os.environ,PATH=str(bin)+':'+os.environ['PATH'],
                RUSTUP_HOME=str(BUILD/'rustup'),CARGO_HOME=str(BUILD/'cargo'),
                RUSTUP_DIST_SERVER=a.rust_dist_server)
@@ -98,8 +178,10 @@ Acquire::Retries "3";
         env.update(HTTP_PROXY=a.proxy, HTTPS_PROXY=a.proxy)
     if not shutil.which('rustup'):
         raise SystemExit('rustup is required; install the official rustup launcher before provisioning')
-    run('rustup','toolchain','install',settings['rust_toolchain'],'--profile','minimal','--component','rust-src',
-        '--target','aarch64-unknown-none',env=env)
+    if not a.offline:
+        run('rustup','toolchain','install',settings['rust_toolchain'],'--profile','minimal','--component','rust-src',
+            '--target','aarch64-unknown-none',env=env)
+    run('rustup', 'default', settings['rust_toolchain'], env=env)
     tools=BUILD/'boot-tools/basetools'
     if not tools.exists():
         platform=a.edk2.resolve().parent
@@ -110,7 +192,7 @@ Acquire::Retries "3";
     import shlex
     exports = dict(PATH=str(bin)+':'+os.environ['PATH'],EDK_TOOLS_PATH=str(tools),
                    RUSTUP_HOME=env['RUSTUP_HOME'],CARGO_HOME=env['CARGO_HOME'],
-                   CARGO_TARGET_DIR=str(BUILD/'boot-cargo-target'),TMPDIR=str(BUILD/'tmp'),
+                   TMPDIR=str(BUILD/'tmp'),
                    )
     if a.proxy:
         exports.update(HTTP_PROXY=a.proxy, HTTPS_PROXY=a.proxy,

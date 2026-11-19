@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "id": "w202ds-kde-hardwareuipack",
+  "kind": "desktop-adaptation",
+  "build": "build.py",
+  "policies": {
+    "board-profile": {
+      "files": ["files/kde"],
+      "disable": ["multi-user.target.wants/systemd-networkd.service"],
+      "verify": {
+        "absent": ["etc/systemd/system/multi-user.target.wants/systemd-networkd.service"],
+        "contains": {
+          "home/reimuks/.local/share/plasma/layout-templates/org.kde.plasma.desktop.defaultPanel/contents/layout.js": [
+            "panel.location = \"left\""
+          ]
+        }
+      },
+      "rootfs_artifacts": [{
+        "rootfs": "desktop-kde/rootfs",
+        "required_elf": [
+          "usr/bin/w202-rotation",
+          "usr/lib/aarch64-linux-gnu/qt6/qml/org/reimuks/popupcache/libpopupcache.so",
+          "usr/lib/aarch64-linux-gnu/qt6/plugins/ksystemstats/ksystemstats_plugin_w202_vpu.so",
+          "usr/libexec/w202-hardware-controls", "usr/libexec/w202-tablet-mode",
+          "usr/libexec/w202-lid-wake", "usr/libexec/w202-tablet-notify",
+          "usr/libexec/w202-gnss-toggle"
+        ]
+      }],
+      "preparers": ["src/kde/prepare.py"]
+    }
+  }
+}

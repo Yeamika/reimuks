@@ -1,0 +1,4 @@
+# W202DS deployment policy; provision matching private firmware/NV separately.
+W202_MODEM_STATE=/var/lib/w202ds/modem-runtime
+W202_MODEM_BOOT_PREPARE=1
+W202_MODEM_FIRMWARE_DIR=/usr/lib/firmware/w202ds/modem

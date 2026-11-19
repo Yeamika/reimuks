@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "w202ds-hall-overlay",
+  "kind": "server-hall-policy",
+  "policies": {
+    "board-profile": {
+      "files": ["files/server-hall"],
+      "services": {
+        "multi-user.target.wants/w202-server-hall.service": "w202-server-hall.service"
+      },
+      "verify": {
+        "symlinks": [
+          "etc/systemd/system/multi-user.target.wants/w202-hall-input.service",
+          "etc/systemd/system/multi-user.target.wants/w202-server-hall.service"
+        ],
+        "files": ["usr/lib/systemd/system/w202-server-hall.service"],
+        "executables": ["usr/libexec/w202-server-hall"],
+        "contains": {"etc/modprobe.d/w202-hall.conf": ["switch_code=-1"]}
+      },
+      "rootfs_artifacts": [{
+        "rootfs": "server-hall/rootfs",
+        "required_elf": ["usr/libexec/w202-server-hall"]
+      }]
+    }
+  }
+}

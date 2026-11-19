@@ -13,7 +13,7 @@ def prepare():
     description = json.loads((backend.REPO/'config/initramfs-tools.json').read_text())
     required = set(description['packages'])
     candidates = {}
-    for state in sorted(backend.distribution_build().glob('apt-*')):
+    for state in sorted(backend.package_cache('').glob('apt-*')):
         for (name, arch), (version, archive) in backend.cached_packages(state).items():
             if name not in required or arch not in (backend.DISTRIBUTION['architecture'], 'all'):
                 continue

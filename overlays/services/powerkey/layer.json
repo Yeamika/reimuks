@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "id": "powerkey",
+  "kind": "shared-service",
+  "build": "build.py",
+  "policies": {
+    "board": {
+      "files": [
+        "files"
+      ],
+      "rootfs_artifacts": [
+        {
+          "rootfs": "powerkey/rootfs",
+          "required_elf": [
+            "usr/libexec/reimuks-powerkey"
+          ]
+        }
+      ],
+      "verify": {
+        "files": [
+          "etc/systemd/logind.conf.d/50-reimuks-powerkey.conf",
+          "usr/lib/systemd/system/reimuks-powerkey.service"
+        ],
+        "executables": [
+          "usr/libexec/reimuks-powerkey-launch"
+        ]
+      }
+    }
+  },
+  "package": "package.py"
+}

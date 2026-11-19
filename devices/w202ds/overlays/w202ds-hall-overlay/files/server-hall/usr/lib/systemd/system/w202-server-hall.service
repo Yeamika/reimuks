@@ -1,0 +1,18 @@
+[Unit]
+Description=W202DS Server lid display policy
+DefaultDependencies=no
+Wants=w202-hall-input.service
+After=basic.target multi-user.target w202-display-login.service w202-hall-input.service
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/w202-server-hall
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

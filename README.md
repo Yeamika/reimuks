@@ -37,9 +37,9 @@ SDK 和 producer 配置见 [板型构建说明](devices/w202ds/README.md)。
 只检查文件长度与 SHA-256，不解释分区内容。
 ESP 的 DebianServer/DebianKde 分别用于 desktop/server 与 desktop/kde。
 旧 ESP 路径名称保留兼容性，不代表存在 Server 专用内核。
-boot 文件固定输出到 `build/artifacts/w202ds/boot/`，也可用 `--output` 指定唯一交付目录。
+boot 文件固定输出到 `build/boards/w202ds/artifacts/boot/`，也可用 `--output` 指定唯一交付目录。
 重复构建更新同一位置；独立构建 UEFI 或 EFI 时保留另一阶段的文件与来源清单。
-编译工作目录固定为 `build/boot/<board>/`，成功后删除；失败时保留现场供排查，下一次构建重新使用该位置。
+编译工作目录固定为 `<build-root>/boot/work/`，成功后删除；失败时保留现场供排查，下一次构建重新使用该位置。
 构建不刷机，也不自动提供 Linux DTB 或根分区。分区镜像经过离线结构与模拟测试，
 仍需真机验证。
 
@@ -56,6 +56,7 @@ rootfs 结构为 `desktop/{server,kde,gnome,niri}` 和顶层 `server`。
 分层职责与产物契约见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 initramfs 消费已导入的内核与模块；rootfs 不指定内核，也不包含 Image 或 `.ko`。
 两者均不编译内核或板级用户态程序。
+发行版基础包树只读取发行版/DE 配置，板级非通用依赖在组合阶段从认证缓存离线安装。
 rootfs 还从 `devices/w202ds/kernel/Devices/<设备>/userspace/` 读取音频、显示和 USB 基础服务模板，
 再应用 [`devices/w202ds/rootfs/`](devices/w202ds/rootfs/README.md) 中的输入含义、网络、登录和桌面策略。
 组件先安装，REIMUKS 的 common 和对应 desktop profile 依次覆盖；组件选择及服务启用在板型 `rootfs/policy.json` 定义。
@@ -72,9 +73,39 @@ Polaris 尚未完成配置、用户态与启动移植，所有目标会在下载
 不会使用 W202DS 的默认输入代替。`supported_targets` 字段用于逐项启用新板型目标；
 未设置此字段的现有板型保持原行为。
 
+## 从独立层包组装目标
+
+`--target compose` 读取目标 JSON，按选定顺序把现有内核、发行版、DE 及可选层封装成目标归档，并逐文件校验 SHA-256。各层自己的脚本独立出包。W202DS 的目标配置在 `devices/w202ds/targets/`。
+
 ## 构建目录
 
-REIMUKS 的下载、工具、解包目录和产物保存在忽略的 `build/` 内，不安装到宿主系统。
+REIMUKS 默认将板级工作树和产物放入 `build/boards/<board>/`。
+`reimuks.py --build-root <输出目录>` 可为本次调用选择其他位置，低层脚本通过
+`REIMUKS_BUILD_ROOT` 使用同一目录；该选择不会移动共享软件包和缓存。
+发行版层位于 `build/distributions/<发行版>/<版本>/<架构>/`：
+`rootfs/<profile>/` 保存通用软件包树，`artifacts/` 保存基础发行版归档，
+`cache/` 保存通用 APT 缓存，`apps/`、`de/` 和 `sdk/` 保存可复用附加包与 SDK。
+板级 APT 依赖独立保存在 `cache/boards/<board>/`，不进入共享的软件包树。
+板级组合工作树位于 `<build-root>/rootfs/<profile>/work/`；最终完整 rootfs 位于
+`<build-root>/artifacts/`。硬件服务、板型 DE 兼容包和用户配置在组合阶段加入。
+通用 App 包位于同一发行版目录的 `apps/<profile>/`，通用 DE 包位于 `de/<profile>/`；
+工具链在 `build/boot-tools/`、`build/compiler/` 和 `build/tools/`，目标 SDK 在发行版目录的 `sdk/`。
+共享数据根目录可用 `REIMUKS_SHARED_BUILD_ROOT` 单独选择，默认仍为仓库 `build/`。
+这些目录都不安装到宿主系统。
+
+```sh
+# 不要求板型或板型源码，构建共享基础发行版
+python3 scripts/distribution.py --distribution debian/trixie --plan
+python3 scripts/distribution.py --distribution debian/trixie
+# 选择板型，组合完整系统
+python3 reimuks.py --board w202ds --target rootfs --profile desktop/kde \
+  --build-root <项目构建目录> --plan
+```
+
+`--plan` 显示解析后的共享目录、板级目录和启动产物路径，不创建输出。
+如需独立指定 boot 工作树，可设置 `REIMUKS_BOOT_ROOT`；其中使用固定的
+`work/`、`artifacts/` 和 `source-cache/`。未设置时优先使用板型 boot 工程的
+`output` 链接，否则使用板级构建目录；`--output` 仍只覆盖 boot 交付目录。
 Linux 工程的内核、模块及硬件用户态输出由其自身管理，统一位于该工程的 `output/`。
 每个目标只保留一份固定输出，不自动生成带日期或版本后缀的副本。
 需要留存构建对照时，构建完成后复制到独立工作区再改名。
@@ -124,7 +155,7 @@ python3 scripts/verify.py
 
 `assemble` 和内核导入拒绝覆盖已有目录，防止把失败的旧状态误当作干净构建。配置日志必须成功，`dpkg --audit` 必须为空，才能打包 rootfs。构建失败时保留日志与现场，不将仅解包的目录标为完成。
 
-可选用户配置与软件包组统一从 [overlay/](overlay/README.md) 进入。私有文件可放在被忽略的 `overlay/user/files/`。
+共享层位于 `overlays/`，用户层的打包脚本位于 `overlays/user/`。
 
 ## 启动交接
 
@@ -153,8 +184,8 @@ rootfs 会在切换完成后再次确保 gadget 和地址存在。当前只提�
 
 ## 产物与部署前事项
 
-默认 Debian trixie 的输出仍在 `build/artifacts/`；其他发行版使用
-`build/distributions/<发行版>/<版本>/artifacts/`，APT 缓存与 rootfs 同样隔离：
+默认 Debian trixie 的板级输出在 `<build-root>/artifacts/`；其他发行版使用
+`<build-root>/distributions/<发行版>/<版本>/artifacts/`。下文示例使用默认 W202DS 目录：
 
 - `initramfs-arm64.cpio.lz4`
 - `desktop-server-arm64-rootfs.tar.gz`
@@ -171,11 +202,11 @@ desktop/server 与 desktop/kde 共用 `config/accounts.json` 的账号策略，�
 基础 rootfs 默认使用仓库的锁定账号策略，不自动读取本地账号文件；打包时将 root/reimuks 重置为不含密码哈希的锁定状态，并移除构建时生成的 SSH 主机密钥。主机密钥由部署后的 SSH 前置服务生成。私有账号、网络和蓝牙配置通过独立用户 overlay 合并，基础归档不会被修改。需要定制密码时，将对应目标系统的 shadow 配置放入私有 overlay，保持严格权限；不要把私有配置提交到仓库。
 
 ```sh
-python3 scripts/user_overlay.py pack --source <私有配置目录> --output build/artifacts/user-overlay.tar.gz
+python3 scripts/user_overlay.py pack --source <私有配置目录> --output build/boards/w202ds/artifacts/user-overlay.tar.gz
 python3 scripts/user_overlay.py merge \
-  --base build/artifacts/desktop-kde-arm64-rootfs.tar.gz \
-  --overlay build/artifacts/user-overlay.tar.gz \
-  --output build/artifacts/desktop-kde-arm64-deployment.tar.gz
+  --base build/boards/w202ds/artifacts/desktop-kde-arm64-rootfs.tar.gz \
+  --overlay build/boards/w202ds/artifacts/user-overlay.tar.gz \
+  --output build/boards/w202ds/artifacts/desktop-kde-arm64-deployment.tar.gz
 ```
 
 私有目录采用目标系统相对路径，如 `etc/NetworkManager/system-connections/`、`var/lib/bluetooth/`、`home/reimuks/.ssh/`。overlay 和部署归档权限为 0600。合并保留基础目录权限和已有系统文件的 uid/gid，用户家目录按基础 passwd 中的 uid/gid 处理，拒绝穿越符号链接路径。合并输出是独立部署包，应在安装前重新检查用户配置，基础包的验证结果不替代部署包的配置验证。
@@ -218,7 +249,7 @@ python3 reimuks.py --board w202ds --target esp \
   --esp-tools <dosfstools和mtools的bin目录>
 ```
 
-固定输出为 `build/artifacts/w202ds/esp.img` 及其文件哈希清单；生成时检查文件系统并逐文件读回校验。输入树必须包含需要保留的其他系统、菜单和设置文件；此目标不读取或修改 GPT，也不刷写设备。宿主工具已在 PATH 时可省略 `--esp-tools`。
+固定输出为 `build/boards/w202ds/artifacts/esp.img` 及其文件哈希清单；生成时检查文件系统并逐文件读回校验。输入树必须包含需要保留的其他系统、菜单和设置文件；此目标不读取或修改 GPT，也不刷写设备。宿主工具已在 PATH 时可省略 `--esp-tools`。
 
 ### Wayland 桌面策略
 
@@ -235,11 +266,12 @@ python3 scripts/startup_preflight.py --rootfs <rootfs目录> --profile kde
 这项检查验证用户态依赖，不能模拟完整 PID 1 启动或验证板上 DRM、USB、
 充电等硬件；实机冷启动仍是独立验收步骤。
 
-KDE 使用 Wayland 登录器和 Plasma Wayland，会话覆盖移除 KWin 的 `--xwayland`，
-不提供 X11 会话；保留 EGL、GLES 和 OpenGL 的硬件渲染包。
-不再主动选择 XWayland 或基于 GLX 的 mesa-utils。
+KDE 使用 Wayland 登录器和 Plasma Wayland，不提供 X11 桌面会话；保留标准
+Plasma 会话所需的 Xwayland 兼容入口，以及 EGL、GLES 和 OpenGL 硬件渲染包。
+不主动选择基于 GLX 的 mesa-utils。
 Debian trixie 的 KWin、GNOME Session 仍硬依赖 xwayland，SDDM 硬依赖 X server，
-因此发行版二进制包及其 X11 库仍可能出现在镜像中，这不代表这些服务会运行。
+因此发行版二进制包及其 X11 库仍可能出现在镜像中；Xwayland 仅服务兼容客户端，
+不会把 KWin 或桌面切换成 X11 会话。
 若要彻底删除这些包或去掉 Mesa 的 X11 编译支持，需要单独重建相关发行版包；
 当前不修改包依赖、不强制卸载系统库。GNOME 启用 Wayland，但其 XWayland
 支持尚未禁用，不将 GNOME 标为纯 Wayland 验收通过。
@@ -253,7 +285,7 @@ rootfs、内核运行包和 ESP 分别构建、分别校验；rootfs 不包含�
 
 跨主机重建须使用相同 Git 提交及子模块、工具链、APT 包版本、源码锁定清单和配置。先比较各文件的长度与 SHA-256，再比较包版本和归档内容；含时间戳、账户初始化状态及设备私有输入的 rootfs 压缩包不能仅凭外层哈希判断代码差异。私有配置和设备固件不提交到仓库。
 
-附加应用不默认加入基础 rootfs；通过 [overlay/apps](overlay/apps/README.md) 单独构建和安装。应用软件源与 Chrome 启动策略随附加包提供，桌面基础层仍保留通用加速 API。APT 缓存可保留其他软件组的包，但 assemble 只安装当前 fetch 清单选定且已校验的文件。
+附加应用不默认加入基础 rootfs；可通过 `scripts/addons.py` 单独打包。应用软件源与 Chrome 启动策略随附加包提供，桌面基础层仍保留通用加速 API。APT 缓存可保留其他软件组的包，但 assemble 只安装当前 fetch 清单选定且已校验的文件。
 
 rootfs 的 tar 流仍由目标端 fakeroot 生成以保留包元数据，压缩由宿主机的 `gzip` 执行；宿主机需提供 gzip。只有归档与压缩进程均成功才发布最终文件。
 
@@ -261,11 +293,12 @@ rootfs 的 tar 流仍由目标端 fakeroot 生成以保留包元数据，压缩�
 ## 可组合的桌面附加包
 
 基础 rootfs、板级基础、通用 DE 兼容、标准 DE、板级桌面适配与用户配置可独立交付。
-包名、构建和离线组合方法见 [`overlay/`](overlay/README.md)。标准 DE 使用发行版元包；板级通用兼容由 KDE/GNOME 共用，桌面专属控件单独打包。
+标准 DE 使用发行版元包；板级通用兼容由 KDE/GNOME 共用，桌面专属控件单独打包。
 
 ```sh
 python3 scripts/layers.py plan --profile kde
-python3 scripts/layers.py pack --profile kde --context build/kde/rootfs
+python3 scripts/layers.py fetch-board --profile kde
+python3 scripts/layers.py pack --profile kde --context build/distributions/debian/trixie/arm64/rootfs/kde/rootfs
 python3 scripts/layers.py fetch --profile kde
 python3 scripts/layers.py bundle --profile kde
 python3 reimuks.py --board w202ds --target rootfs --profile desktop/server --base-only

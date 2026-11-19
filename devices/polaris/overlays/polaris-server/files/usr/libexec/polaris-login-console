@@ -1,0 +1,11 @@
+#!/bin/sh
+# Startup keeps the inherited UI; login explicitly takes the full native panel.
+set -eu
+control=/sys/module/msm/parameters/polaris_console_fullscreen
+[ -e "$control" ] || exit 0
+printf '1\n' >"$control"
+[ "$(cat /sys/class/graphics/fb0/virtual_size)" = 1080,2160 ]
+# fbdev registration starts in POWERDOWN; make the login modeset explicit.
+blank=/sys/class/graphics/fb0/blank
+printf '0\n' >"$blank"
+[ "$(cat "$blank")" = 0 ]

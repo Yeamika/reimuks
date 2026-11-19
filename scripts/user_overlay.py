@@ -3,6 +3,7 @@
 import argparse
 import gzip
 import io
+import json
 import os
 from pathlib import Path, PurePosixPath
 import tarfile
@@ -84,10 +85,65 @@ def merge_passwords(base, private):
     return ('\n'.join(updates.get(line.split(':',1)[0],line) for line in lines)+'\n').encode()
 
 
+def validate_deployment(original, private, base_entries, additions):
+    """Validate board-declared private inputs before publishing a deployment.
+
+    Base images may omit proprietary/device inputs. A deployment must include
+    their declared files; a successful generic tar merge alone is insufficient.
+    """
+    descriptor = 'usr/lib/reimuks/deployment-requirements.json'
+    if descriptor not in base_entries:
+        return
+    if descriptor in additions or not base_entries[descriptor].isfile():
+        raise ValueError('Deployment requirements must come from the base image')
+    contract = json.load(original.extractfile(base_entries[descriptor]))
+    if contract.get('schema') == 1:
+        requirements = [contract]
+        allowed = {'schema', 'files', 'directories', 'symlinks', 'contains'}
+    elif contract.get('schema') == 2 and set(contract) == {'schema', 'runtime', 'device'}:
+        requirements = [contract['runtime'], contract['device']]
+        allowed = {'files', 'directories', 'symlinks', 'contains'}
+    else:
+        raise ValueError('Unsupported deployment requirements')
+    if any(not isinstance(section, dict) or section.keys() - allowed for section in requirements):
+        raise ValueError('Unsupported deployment requirements')
+    combined = {**base_entries, **additions}
+
+    def entry(name):
+        if (not isinstance(name, str) or not name or
+                PurePosixPath(name).is_absolute() or
+                '..' in PurePosixPath(name).parts or str(PurePosixPath(name)) != name):
+            raise ValueError('Unsafe deployment requirement path')
+        if name not in combined:
+            raise ValueError('Missing deployment input: '+name)
+        return combined[name]
+
+    for section in requirements:
+        for name in section.get('files', []):
+            item = entry(name)
+            if not item.isfile() or not item.size:
+                raise ValueError('Deployment input must be a nonempty regular file: '+name)
+        for name in section.get('directories', []):
+            if not entry(name).isdir():
+                raise ValueError('Deployment input must be a directory: '+name)
+        for name, target in section.get('symlinks', {}).items():
+            item = entry(name)
+            if not item.issym() or item.linkname != target:
+                raise ValueError('Unexpected deployment symlink: '+name)
+        for name, tokens in section.get('contains', {}).items():
+            item = entry(name)
+            if not item.isfile() or item.size > 1024 * 1024:
+                raise ValueError('Invalid deployment text input: '+name)
+            source = private if name in additions else original
+            words = source.extractfile(item).read().decode().split()
+            if not all(token in words for token in tokens):
+                raise ValueError('Missing required deployment token: '+name)
+
+
 def merge(base, overlay, output):
     if Path(output).resolve() in (Path(base).resolve(), Path(overlay).resolve()):
         raise ValueError('Deployment output must differ from input archives')
-    with tarfile.open(overlay, 'r:gz') as private, tarfile.open(base, 'r:gz') as original:
+    with tarfile.open(overlay, 'r:gz') as private, tarfile.open(base, 'r:*') as original:
         additions = validate(private.getmembers())
         # Inspect the combined tree before emitting anything. Never allow a
         # private child to land beneath a base symlink or replace a directory.
@@ -100,6 +156,7 @@ def merge(base, overlay, output):
                 ancestor = additions.get(str(parent), base_entries.get(str(parent)))
                 if ancestor is not None and not ancestor.isdir():
                     raise ValueError('Overlay traverses a non-directory: '+name)
+        validate_deployment(original, private, base_entries, additions)
         users = {}
         passwd = base_entries.get('etc/passwd')
         if passwd is not None:
@@ -116,7 +173,7 @@ def merge(base, overlay, output):
         def emit(result):
             # Reopen for sequential extraction rather than seeking repeatedly
             # through a compressed base image.
-            with tarfile.open(base, 'r|gz') as stream:
+            with tarfile.open(base, 'r|*') as stream:
                 for info in stream:
                     name = info.name.removeprefix('./').rstrip('/')
                     if name in additions and not info.isdir():

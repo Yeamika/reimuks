@@ -6,15 +6,26 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from output_paths import build_root, shared_root, temporary_environment
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def tool_environment():
-    env = dict(os.environ)
-    cache = ROOT / 'build'
+def tool_environment(board=None):
+    cache = shared_root()
+    env = temporary_environment(build_root(board))
     compiler = cache / 'compiler'
     host = cache / 'tools/host'
+    wrapped = cache / 'boot-tools/bin'
+    if (wrapped/'cc').is_file() and (cache/'boot-tools/cross-runtime/cc1').is_file():
+        # Prepared wrappers load cached tools with their own runtime. Keep the
+        # raw Debian bin/lib trees out of native apt, dpkg and compiler calls:
+        # the build host can have an older libc than the cached toolchain.
+        env['PATH'] = str(wrapped) + os.pathsep + env.get('PATH', '')
+        env.pop('LD_LIBRARY_PATH', None)
+        env['HOSTCC'] = str(wrapped/'cc')
+        env['HOSTCXX'] = str(wrapped/'c++')
+        return env
     bins = [host / 'bin', host / 'usr/bin', host / 'sbin',
             cache / 'boot-tools/bin', cache / 'tools/native/bin', compiler / 'root/usr/bin']
     env['PATH'] = os.pathsep.join(str(p) for p in bins if p.is_dir()) + os.pathsep + env.get('PATH', '')
@@ -60,7 +71,7 @@ def main():
     subprocess.run([sys.executable, str(builder), '--profile', args.profile,
                     '--kernel-out', str(source / 'output' / ('kernel-' + args.profile)),
                     '--jobs', str(args.jobs), 'all'], cwd=source,
-                   env=tool_environment(), check=True)
+                   env=tool_environment(args.board), check=True)
 
 
 if __name__ == '__main__':

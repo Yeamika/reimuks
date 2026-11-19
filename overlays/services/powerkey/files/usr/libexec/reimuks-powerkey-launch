@@ -1,0 +1,23 @@
+#!/usr/bin/python3
+"""Select a standard KEY_POWER input, then run the existing power-key binary."""
+import fcntl
+import glob
+import os
+
+if os.environ.get('REIMUKS_POWERKEY_INPUT_NAME', 'auto') == 'auto':
+    for event in sorted(glob.glob('/dev/input/event*')):
+        try:
+            with open(event, 'rb', buffering=0) as device:
+                keys = bytearray(96)
+                fcntl.ioctl(device, (2 << 30) | (96 << 16) | (ord('E') << 8) | 0x21, keys)
+                if not keys[116 // 8] & (1 << (116 % 8)):
+                    continue
+                name = bytearray(256)
+                fcntl.ioctl(device, (2 << 30) | (256 << 16) | (ord('E') << 8) | 0x06, name)
+                os.environ['REIMUKS_POWERKEY_INPUT_NAME'] = name.split(b'\0', 1)[0].decode()
+                break
+        except OSError:
+            continue
+    else:
+        raise SystemExit('No KEY_POWER input is available yet')
+os.execve('/usr/libexec/reimuks-powerkey', ['reimuks-powerkey'], os.environ)

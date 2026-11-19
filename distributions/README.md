@@ -55,11 +55,12 @@ server 基础清单保留启动、登录、SSH、DNS/校时、文件系统管理
 默认最小用户态提供 BusyBox/blkid，不随 rootfs 发行版或桌面选项变化。
 宿主工具和 boot 工具链是独立的构建依赖，不随目标发行版一起改换。
 
-现有 Debian trixie 的目录和产物名保持不变：`build/{server,kde,gnome}`、
-`build/apt-{server,kde,gnome}`、`build/artifacts/`。其他发行版使用
-`build/distributions/<发行版>/<版本>/` 下独立的 rootfs、APT 缓存
-和 artifacts。initramfs 作为板级公共产物仍放在默认 artifacts 下。内核导入仍共用 `build/kernel`，工具共用 `build/tools`；内核的
-多版本选择不属于本次发行版抽象。
+发行版层统一使用 `build/distributions/<发行版>/<版本>/<架构>/`，其中
+`rootfs/<profile>/` 是通用软件包树，`cache/` 是软件包缓存，`artifacts/` 是基础系统归档。
+`scripts/distribution.py` 可在没有板型工程时构建这一层。
+板级依赖、软件源和覆盖在组合阶段加入，组合工作树和完整镜像位于
+`--build-root` 指定的位置，默认 `build/boards/<board>/`。
+initramfs 和导入内核仍归板级构建目录；工具链保留在共享 `build/tools` 等目录。
 
 缓存和工作目录会记录发行版配置哈希，配置变化时拒绝复用，要求使用干净目录。
 复用历史 Debian rootfs 前检查真实 `os-release`，不会重新 configure 已配置系统
@@ -67,8 +68,8 @@ server 基础清单保留启动、登录、SSH、DNS/校时、文件系统管理
 产物；没有身份字段的历史产物只兼容默认 Debian trixie。
 
 桌面附加应用由 `debian/trixie/additional-packages.json` 独立定义，KDE、GNOME
-共用 Chrome、VS Code、btop、fastfetch、vim、lazygit；不把它们写进 DE 元包
-清单，也不默认加入基础 rootfs。通过 `scripts/addons.py` 生成独立软件附加包；Chrome 和 VS Code 使用各自签名的软件源，公开密钥
+共用 Chrome、VS Code、btop、fastfetch、vim、lazygit、Moonlight Qt；不把它们写进 DE 元包
+清单，也不默认加入基础 rootfs。通过 `scripts/addons.py` 生成独立软件附加包；Chrome、VS Code 和 Moonlight Qt 使用各自签名的软件源，公开密钥
 随配置提供并验证 SHA256，APT 仍须验证仓库签名和软件包哈希。
 
 通用桌面接口依赖统一定义在 `debian/trixie/desktop/common.json`，由 `reimuks-de-common` 元包管理；KDE/GNOME 标准包与板级通用 DE 兼容包分别依赖它。

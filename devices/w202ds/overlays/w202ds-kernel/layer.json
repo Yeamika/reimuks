@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "w202ds-kernel",
+  "kind": "kernel-artifacts",
+  "source": "kernel",
+  "userspace_manifest": "kernel/board-userspace.json",
+  "image_builder": "kernel/scripts/build.py",
+  "module_exporter": "kernel/scripts/runtime-export.py",
+  "artifacts": ["Image", "modules", "identity.json", "manifest.json"]
+}

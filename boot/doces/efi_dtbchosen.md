@@ -92,7 +92,7 @@ initramfs 校验长度、字符和连字符位置，再按 PARTUUID 挂载 ext4�
 
 ```sh
 python3 scripts/boot_bundle.py --profile server \
-  --image build/kernel/Image --initrd build/artifacts/initramfs-arm64.cpio.lz4 \
+  --image build/boards/w202ds/kernel/Image --initrd build/boards/w202ds/artifacts/initramfs-arm64.cpio.lz4 \
   --dtb /path/to/validated/LINUX.DTB --root-partuuid ACTUAL-GPT-PARTUUID \
   --output build/esp-server
 ```

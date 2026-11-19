@@ -14,8 +14,9 @@ python3 reimuks.py --board w202ds --distribution debian/trixie \
   --target rootfs --profile desktop/gnome
 ```
 
-构建缓存使用 `build/gnome`、`build/apt-gnome`，产物为
-`build/artifacts/desktop-gnome-arm64-rootfs.tar.gz`。
+通用包树在 `build/distributions/debian/trixie/arm64/rootfs/gnome/`，
+软件包缓存位于同一发行版目录的 `cache/apt-gnome/`；板级产物为
+`build/boards/w202ds/artifacts/desktop-gnome-arm64-rootfs.tar.gz`。
 账号按通用账号配置提供，不设置默认密码或自动登录。
 这是独立 rootfs；不是在现有 KDE 系统上直接替换显示管理器的安装脚本。
 

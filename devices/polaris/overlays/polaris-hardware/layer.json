@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "id": "polaris-hardware",
+  "kind": "board-hardware",
+  "package": "package.py",
+  "policies": {
+    "board": {
+      "files": ["files"],
+      "services": {
+        "multi-user.target.wants/polaris-usb-gadget.service": "polaris-usb-gadget.service",
+        "multi-user.target.wants/polaris-display-status.service": "polaris-display-status.service"
+      },
+      "verify": {
+        "executables": [
+          "usr/libexec/polaris-usb-gadget",
+          "usr/libexec/polaris-display-status",
+          "usr/libexec/reimuks-display-toggle"
+        ],
+        "files": [
+          "usr/lib/systemd/system/polaris-usb-gadget.service",
+          "usr/lib/systemd/system/polaris-display-status.service",
+          "etc/systemd/system.conf.d/50-polaris-watchdog.conf"
+        ],
+        "absent": ["usr/libexec/w202-usb-gadget"],
+        "contains": {
+          "etc/systemd/system.conf.d/50-polaris-watchdog.conf": [
+            "RuntimeWatchdogSec=20s",
+            "RebootWatchdogSec=30s"
+          ],
+          "etc/modprobe.d/50-polaris-dsi-handoff.conf": [
+            "options msm polaris_dsi_handoff=0"
+          ]
+        }
+      }
+    }
+  }
+}

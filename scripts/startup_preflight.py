@@ -21,6 +21,11 @@ def verify(root, profile, runner):
         ['/bin/sh', '-ec', '. /etc/default/locale; export LANG; '
          '/usr/bin/python3 -c \'import locale; locale.setlocale(locale.LC_ALL, "")\''],
     ]
+    firmware_checks = sorted((root/'usr/lib/reimuks/firmware').glob('*.sha256'))
+    if firmware_checks:
+        commands.append(['/bin/sh', '-ec',
+                         'cd /; exec /usr/bin/sha256sum --check "$@"', 'preflight',
+                         *['/'+str(path.relative_to(root)) for path in firmware_checks]])
     scripts = {'/bin/sh': [], '/bin/bash': []}
     for script in sorted((root / 'usr/libexec').glob('*')):
         if script.is_file():
@@ -74,10 +79,30 @@ def verify(root, profile, runner):
                       'set -- /usr/lib/*/qt5/plugins/platforms/libqwayland-generic.so; '
                       'test -f "$1"; /lib/ld-linux-aarch64.so.1 --list "$1"'],
                      ['/bin/sh', '-ec', 'test -n "$(/usr/bin/fc-list :lang=zh family)"']]
+    if profile.removeprefix('desktop/') == 'gnome':
+        commands += [['/usr/bin/gnome-shell', '--version'],
+                     ['/usr/sbin/gdm3', '--version'],
+                     ['/usr/bin/gsettings', 'range',
+                      'org.gnome.settings-daemon.peripherals.touchscreen', 'orientation-lock'],
+                     ['/usr/bin/gsettings', 'range',
+                      'org.gnome.desktop.a11y.applications', 'screen-keyboard-enabled'],
+                     ['/bin/sh', '-ec', 'test -x /usr/bin/gnome-session; '
+                      'test -f /usr/share/wayland-sessions/gnome.desktop; '
+                      'test -n "$(/usr/bin/fc-list :lang=zh family)"']]
+    if (root/'usr/bin/niri').is_file():
+        commands += [
+            ['/usr/bin/niri', '--version'],
+            ['/usr/bin/niri', 'validate', '-c', '/usr/share/doc/niri/examples/default-config.kdl'],
+            ['/bin/sh', '-ec', 'test -x /usr/bin/niri-session; '
+             'grep -qx Exec=niri-session /usr/share/wayland-sessions/niri.desktop'],
+        ]
     units = sorted({p.name for base in ('usr/lib/systemd/system', 'etc/systemd/system')
-                    for p in (root / base).glob('w202*.service') if p.is_file()})
+                    for pattern in ('w202*.service', 'polaris*.service')
+                    for p in (root / base).glob(pattern) if p.is_file()})
     if profile.removeprefix('desktop/') == 'kde':
         units.append('sddm.service')
+    if profile.removeprefix('desktop/') == 'gnome':
+        units.append('gdm.service')
     if units:
         commands.append(['/usr/bin/systemd-analyze', 'verify', '--man=no', *units])
     for command in commands:

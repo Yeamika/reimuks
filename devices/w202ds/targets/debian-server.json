@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "id": "w202ds-debian-server",
+  "board": "w202ds",
+  "distribution": "debian/trixie",
+  "architecture": "arm64",
+  "layers": [
+    "kernel/w202ds/package.json",
+    "distro/debian/trixie/arm64/package.json",
+    {
+      "id": "powerkey",
+      "receipt": "overlays/services/arm64/powerkey/package.json",
+      "producer": "overlays/services/powerkey/package.py",
+      "requires": [
+        "distribution"
+      ]
+    },
+    {
+      "id": "powerkey-interface",
+      "receipt": "overlays/w202ds/arm64/powerkey-interface/package.json",
+      "producer": "devices/w202ds/overlays/w202ds-powerkey-interface/package.py",
+      "requires": [
+        "kernel"
+      ]
+    },
+    {
+      "id": "server-common",
+      "receipt": "overlays/services/arm64/server-common/package.json",
+      "producer": "overlays/services/desktop-server-common/package.py",
+      "requires": [
+        "distribution",
+        "powerkey",
+        "powerkey-interface"
+      ]
+    },
+    "overlays/w202ds/arm64/server-hall/package.json",
+    {
+      "id": "debian-server-adapter",
+      "receipt": "adapters/w202ds/debian/trixie/arm64/server/package.json",
+      "producer": "devices/w202ds/overlays/w202ds-server/debian-adapter.py",
+      "requires": [
+        "kernel",
+        "distribution",
+        "powerkey",
+        "powerkey-interface",
+        "server-common",
+        "server-hall"
+      ]
+    }
+  ]
+}

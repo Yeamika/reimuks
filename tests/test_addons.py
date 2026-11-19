@@ -64,3 +64,36 @@ class ApplicationBundle(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'authenticated'):
                     addons.pack('kde',state,state/'bundle.tar.gz')
             self.assertFalse((state/'bundle.tar.gz').exists())
+
+
+class ApplicationSources(unittest.TestCase):
+    def configure(self, root):
+        namespace = {'__name__': 'test_app_configuration'}
+        exec(addons.CONFIGURE, namespace)
+        namespace['configure'](root)
+
+    def test_upgrade_removes_only_generated_duplicate_repository(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sources = root/'etc/apt/sources.list.d'
+            sources.mkdir(parents=True)
+            (sources/'reimuks-apps.list').write_text('deb [arch=arm64 signed-by=/usr/share/keyrings/reimuks-microsoft.asc] https://packages.microsoft.com/repos/code stable main\n')
+            generated = sources/'vscode.sources'
+            generated.write_text('### THIS FILE IS AUTOMATICALLY CONFIGURED ###\nTypes: deb\nURIs: https://packages.microsoft.com/repos/code\nSuites: stable\nComponents: main\nSigned-By: /usr/share/keyrings/microsoft.gpg\n')
+            user = sources/'other.sources'
+            user.write_text('Types: deb\nURIs: https://example.org/packages\n')
+            self.configure(root)
+            self.assertFalse(generated.exists())
+            self.assertTrue(user.exists())
+            self.configure(root)
+
+    def test_user_repository_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sources = root/'etc/apt/sources.list.d'
+            sources.mkdir(parents=True)
+            (sources/'reimuks-apps.list').write_text('deb https://packages.microsoft.com/repos/code stable main\n')
+            user = sources/'vscode.sources'
+            user.write_text('Types: deb\nURIs: https://packages.microsoft.com/repos/code\nSigned-By: /usr/share/keyrings/owner.asc\n')
+            self.configure(root)
+            self.assertTrue(user.exists())

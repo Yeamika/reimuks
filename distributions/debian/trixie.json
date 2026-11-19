@@ -15,7 +15,7 @@
   "install_recommends": false,
   "build_repositories": [
     {
-      "uri": "https://ftp.debian.org/debian",
+      "uri": "http://deb.debian.org/debian",
       "suite": "trixie"
     }
   ],

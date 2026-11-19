@@ -1,0 +1,10 @@
+[Unit]
+Description=Check W202DS supplicant driver binding
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=20
+AccuracySec=2
+
+[Install]
+WantedBy=timers.target

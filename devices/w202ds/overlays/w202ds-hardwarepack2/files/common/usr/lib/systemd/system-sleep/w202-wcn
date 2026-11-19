@@ -1,0 +1,90 @@
+#!/bin/sh
+# Cold-open SC2355 after sleep; do not persist a temporary hardware shutdown.
+# System-sleep runs with user.slice frozen. Only kernel and system services are
+# touched here; NetworkManager retains connection selection and credentials.
+set -eu
+STATE=/run/w202-wcn-sleep
+REBOOT=/sys/module/sprd_wlan_combo/parameters/recovery_reboot
+
+wifi_soft() {
+    for node in /sys/class/net/wlan0/phy80211/rfkill*/soft; do
+        [ -f "$node" ] || continue
+        printf '%s\n' "$node"
+        return 0
+    done
+    return 1
+}
+
+remember_service() {
+    if systemctl -q is-active "$1"; then
+        touch "$STATE/$2"
+    fi
+}
+
+case "${1:-}" in
+pre)
+    # Do not overwrite a pending restore after a failed/duplicate invocation.
+    [ ! -d "$STATE" ] || exit 0
+    [ -d /sys/class/net/wlan0/phy80211 ] || exit 0
+    umask 077
+    mkdir "$STATE"
+    soft=$(wifi_soft) || { rmdir "$STATE"; exit 0; }
+    cat "$soft" > "$STATE/wifi-soft"
+    remember_service w202-bluetooth.service bluetooth
+    remember_service w202-bluetooth-state.service bluetooth-state
+    # Otherwise BlueZ's temporary Powered=false could replace the user's saved
+    # choice. Restore the watcher only after the transport starts again.
+    if [ -e "$STATE/bluetooth-state" ]; then
+        systemctl stop w202-bluetooth-state.service
+    fi
+    # An intentional interface shutdown must not trigger the recovery reboot.
+    if [ -w "$REBOOT" ]; then
+        cat "$REBOOT" > "$STATE/recovery-reboot"
+        printf 'N\n' > "$REBOOT"
+    fi
+    # Close every cfg80211 interface, including supplicant's P2P interface,
+    # before stopping BT. A link-down of wlan0 alone leaves the chip open.
+    printf '1\n' > "$soft"
+    if [ -e "$STATE/bluetooth" ]; then
+        systemctl stop w202-bluetooth.service
+    fi
+    # Rebuild Wi-Fi's host-side queues as well as cycling the firmware. Keeping
+    # the old module across sleep can retain EDMA/RX buffer ownership.
+    if [ -d /sys/module/sprd_wlan_combo ]; then
+        if timeout 15 modprobe -r sprd_wlan_combo; then
+            touch "$STATE/reload-wifi"
+        else
+            echo 'w202-wcn: Wi-Fi module did not unload before sleep' >&2
+        fi
+    fi
+    ;;
+post)
+    [ -d "$STATE" ] || exit 0
+    if [ -e "$STATE/reload-wifi" ]; then
+        # Leave STATE intact on failure for an explicit retry. Never reboot.
+        timeout 20 modprobe sprd_wlan_combo recovery_reboot=0
+    fi
+    attempt=0
+    until soft=$(wifi_soft); do
+        attempt=$((attempt + 1))
+        [ "$attempt" -lt 50 ] || {
+            echo 'w202-wcn: Wi-Fi rfkill did not return; restore is pending' >&2
+            exit 1
+        }
+        sleep 0.1
+    done
+    # No nmcli connection-up and no changes to connection profiles: the
+    # network manager decides whether/where to reconnect, including AP mode.
+    cat "$STATE/wifi-soft" > "$soft"
+    if [ -e "$STATE/recovery-reboot" ] && [ -w "$REBOOT" ]; then
+        cat "$STATE/recovery-reboot" > "$REBOOT"
+    fi
+    if [ -e "$STATE/bluetooth" ]; then
+        systemctl --no-block start w202-bluetooth.service
+    fi
+    if [ -e "$STATE/bluetooth-state" ]; then
+        systemctl --no-block start w202-bluetooth-state.service
+    fi
+    rm -rf "$STATE"
+    ;;
+esac

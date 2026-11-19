@@ -31,7 +31,7 @@ code = 0
 if name == 'systemctl':
     words = [arg for arg in args if not arg.startswith('-')]
     if words[0] == 'is-active':
-        code = 0 if state['bluetooth'] else 3
+        code = 0 if words[1] == 'w202-bluetooth.service' and state['bluetooth'] else 3
     elif words[0] == 'stop':
         state['bluetooth'] = False
     elif words[0] == 'start':
@@ -64,8 +64,8 @@ class Harness:
         if present:
             self.soft.parent.mkdir(parents=True)
             self.soft.write_text('1' if blocked else '0')
-        self.marker = self.base / 'run/w202-wcn-bt-stopped'
-        self.marker.parent.mkdir()
+        (self.base / 'run').mkdir()
+        self.marker = self.base / 'run/w202-wcn-sleep/bluetooth'
         self.state = self.base / 'state.json'
         self.state.write_text(json.dumps({'bluetooth': bluetooth, 'up': up,
                                           'nm_ready': nm_ready}))
@@ -86,7 +86,7 @@ class Harness:
                            'usr/lib/systemd/system-sleep/w202-wcn')
         # Redirect only filesystem locations; run the actual shell flow unchanged.
         text = source.read_text().replace('/sys/class/net/', str(self.net) + '/')
-        text = text.replace('/run/w202-wcn-bt-stopped', str(self.marker))
+        text = text.replace('/run/w202-wcn-sleep', str(self.marker.parent))
         script = self.base / (kind + '.sh')
         script.write_text(text)
         result = subprocess.run(['sh', str(script), *args], env=self.env,
@@ -153,8 +153,10 @@ def exhausted(h):
 def sleep_active(h):
     h.run('sleep', 'pre')
     assert h.marker.exists() and not json.loads(h.state.read_text())['bluetooth']
+    assert h.soft.read_text().strip() == '1'
     h.run('sleep', 'post')
     assert not h.marker.exists() and json.loads(h.state.read_text())['bluetooth']
+    assert h.soft.read_text().strip() == '0'
     assert len(h.actions()) == 2
     h.run('sleep', 'post')
     assert len(h.actions()) == 2

@@ -33,7 +33,7 @@ class AccelerationTest(unittest.TestCase):
             self.assertFalse(list(root.iterdir()))
 
     def test_vulkan_is_optional_and_sandbox_stays_enabled(self):
-        script = Path(__file__).resolve().parents[1]/'distributions/debian/trixie/rootfs/usr/bin/reimuks-chrome'
+        script = Path(__file__).resolve().parents[1]/'overlays/apps/remote/files/usr/bin/reimuks-chrome'
         for extra, angle in [([], 'gles'), (['--reimuks-vulkan'], 'vulkan')]:
             with patch.object(sys, 'argv', [str(script), *extra, 'about:blank']), patch('os.execve') as execute, patch.object(Path, 'exists', return_value=False):
                 runpy.run_path(str(script), run_name='__main__')
@@ -43,7 +43,7 @@ class AccelerationTest(unittest.TestCase):
                 self.assertNotIn('--disable-gpu-sandbox', argv)
 
     def test_vulkan_uses_board_supplied_environment_only_when_requested(self):
-        script = Path(__file__).resolve().parents[1]/'distributions/debian/trixie/rootfs/usr/bin/reimuks-chrome'
+        script = Path(__file__).resolve().parents[1]/'overlays/apps/remote/files/usr/bin/reimuks-chrome'
         policy = json.dumps({'vulkan_environment': {'VK_DRIVER_FILES': '/usr/share/example/icd.json'}})
         for extra, enabled in [([], False), (['--reimuks-vulkan'], True)]:
             with patch.object(sys, 'argv', [str(script), *extra]), patch('os.execve') as execute, patch.object(Path, 'exists', return_value=True), patch.object(Path, 'read_text', return_value=policy), patch.dict('os.environ', {}, clear=True):

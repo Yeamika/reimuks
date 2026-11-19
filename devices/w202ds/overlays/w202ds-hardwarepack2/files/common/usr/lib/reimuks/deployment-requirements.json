@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "files": [
+    "var/lib/w202ds/modem-runtime/android-cmdline-A.txt",
+    "var/lib/w202ds/modem-runtime/android/apex/com.android.runtime/bin/linker64",
+    "var/lib/w202ds/modem-runtime/android/apex/com.android.runtime/lib64/bionic/libc.so",
+    "var/lib/w202ds/modem-runtime/android/apex/com.android.runtime/lib64/bionic/libdl.so",
+    "var/lib/w202ds/modem-runtime/android/apex/com.android.runtime/lib64/bionic/libdl_android.so",
+    "var/lib/w202ds/modem-runtime/android/apex/com.android.runtime/lib64/bionic/libm.so",
+    "var/lib/w202ds/modem-runtime/android/system/bin/sh",
+    "var/lib/w202ds/modem-runtime/android/system/bin/toolbox",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/android.system.suspend-V1-ndk.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libandroid_runtime_lazy.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libbase.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libbinder.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libbinder_ndk.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libc++.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libcutils.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libexpat.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libhardware_legacy.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libhidlbase.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/liblog.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libtrusty.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libutils.so",
+    "var/lib/w202ds/modem-runtime/android/system/lib64/libvndksupport.so",
+    "var/lib/w202ds/modem-runtime/android/vendor/bin/cp_diskserver",
+    "var/lib/w202ds/modem-runtime/android/vendor/bin/modem_control",
+    "var/lib/w202ds/modem-runtime/android/vendor/etc/cp_dump_info.xml",
+    "var/lib/w202ds/modem-runtime/android/vendor/etc/modem_ch_info.xml",
+    "var/lib/w202ds/modem-runtime/android/vendor/etc/modem_cp_info.xml",
+    "var/lib/w202ds/modem-runtime/android/vendor/etc/modem_sp_info.xml",
+    "var/lib/w202ds/modem-runtime/android/vendor/lib64/lib_crypto.so",
+    "var/lib/w202ds/modem-runtime/android/vendor/lib64/libkernelbootcp.trusty.so",
+    "var/lib/w202ds/modem-runtime/nv/nr_fixnv1_a.img",
+    "var/lib/w202ds/modem-runtime/nv/nr_fixnv2_a.img",
+    "var/lib/w202ds/modem-runtime/nv/nr_runtimenv1.img",
+    "var/lib/w202ds/modem-runtime/nv/nr_runtimenv2.img",
+    "var/lib/w202ds/modem-runtime/runtime-code.sha256"
+  ],
+  "directories": [
+    "var/lib/w202ds/modem-runtime/android",
+    "var/lib/w202ds/modem-runtime/android/dev/block/by-name",
+    "var/lib/w202ds/modem-runtime/android/dev/socket",
+    "var/lib/w202ds/modem-runtime/android/firmware",
+    "var/lib/w202ds/modem-runtime/android/sys",
+    "var/lib/w202ds/modem-runtime/android/tmp",
+    "var/lib/w202ds/modem-runtime/android/data"
+  ],
+  "symlinks": {
+    "var/lib/w202ds/modem-runtime/android/dev/block/by-name/nr_modem_a": "../../../firmware/nr_modem_a.img",
+    "var/lib/w202ds/modem-runtime/android/dev/block/by-name/nr_deltanv_a": "../../../firmware/nr_deltanv_a.img",
+    "var/lib/w202ds/modem-runtime/android/dev/block/by-name/nr_phy_a": "../../../firmware/nr_phy_a.img",
+    "var/lib/w202ds/modem-runtime/android/dev/block/by-name/pm_sys_a": "../../../firmware/pm_sys_a.img",
+    "var/lib/w202ds/modem-runtime/android/dev/block/by-name/ch_sys_a": "../../../firmware/ch_sys_a.img"
+  },
+  "contains": {
+    "var/lib/w202ds/modem-runtime/android-cmdline-A.txt": [
+      "modem=shutdown"
+    ]
+  }
+}

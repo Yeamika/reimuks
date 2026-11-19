@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#include "../devices/w202ds/desktop/common/device-controls/source/bus.h"
+#include "../devices/w202ds/overlays/w202ds-hardwarepack2/src/device-controls/source/bus.h"
 #include <assert.h>
 int main(void){
  assert(bus_boolean_json("{\"type\":\"b\",\"data\":true}")==1);

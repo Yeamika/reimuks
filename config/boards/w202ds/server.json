@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "board": "w202ds",
+  "profile": "desktop/server",
+  "kernel": "w202ds-kernel",
+  "overlays": ["w202ds-hardwarepack2", "services/powerkey", "w202ds-powerkey-interface", "w202ds-server", "w202ds-hall-overlay"],
+  "package_profile": "server",
+  "builder": "w202ds-hardwarepack2"
+}

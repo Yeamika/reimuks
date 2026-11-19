@@ -1,0 +1,168 @@
+{
+  "schema": 1,
+  "id": "w202ds-hardwarepack2",
+  "kind": "board-hardware-and-api",
+  "build": "build.py",
+  "policies": {
+    "board": {
+      "components": [
+        "usb3",
+        "drm",
+        "charging",
+        "audio",
+        "gpu",
+        "vpu",
+        "touchscreen",
+        "wcn",
+        "modem",
+        "sensorhub",
+        "keyboard",
+        "hall",
+        "camera"
+      ],
+      "files": [
+        "files/common"
+      ],
+      "services": {
+        "multi-user.target.wants/w202-usb-gadget.service": "w202-usb-gadget.service",
+        "getty.target.wants/serial-getty@ttyGS0.service": "serial-getty@.service",
+        "timers.target.wants/w202-charging.timer": "w202-charging.timer",
+        "multi-user.target.wants/w202-audio.service": "w202-audio.service",
+        "multi-user.target.wants/w202-touch.service": "w202-touch.service",
+        "multi-user.target.wants/w202-wifi.service": "w202-wifi.service",
+        "multi-user.target.wants/w202-bluetooth.service": "w202-bluetooth.service",
+        "multi-user.target.wants/w202-modem-runtime.service": "w202-modem-runtime.service",
+        "multi-user.target.wants/w202-sensorhub.service": "w202-sensorhub.service",
+        "multi-user.target.wants/w202-keyboard.service": "w202-keyboard.service"
+      },
+      "remove": [
+        "etc/systemd/system/multi-user.target.wants/w202-charging.service",
+        "etc/systemd/system/ssh.service.d/20-w202-ready.conf",
+        "etc/systemd/system/multi-user.target.wants/w202-hall.service",
+        "etc/systemd/system/w202-hall.service.d/50-kernel-compat.conf",
+        "usr/lib/systemd/system/w202-hall.service",
+        "usr/libexec/w202-vpu",
+        "usr/bin/w202-vpu",
+        "usr/libexec/w202-vpu-start",
+        "usr/libexec/w202-vpu-stop",
+        "usr/libexec/w202-vpu-worker-ns",
+        "usr/lib/systemd/system/w202-vpu.service",
+        "etc/systemd/system/multi-user.target.wants/w202-vpu.service"
+      ],
+      "verify": {
+        "files": [
+          "usr/lib/systemd/system/w202-charging.timer",
+          "usr/libexec/w202-usb-gadget",
+          "usr/lib/systemd/system/w202-usb-gadget.service",
+          "etc/default/w202-usb-gadget",
+          "etc/systemd/network/80-w202-usb.network",
+          "etc/systemd/system/serial-getty@ttyGS0.service.d/w202-usb-gadget.conf",
+          "etc/modprobe.d/w202-modem-ordered.conf",
+          "usr/lib/systemd/system-sleep/w202-wcn",
+          "etc/systemd/system/w202-wcn-reopen.service.d/20-sleep.conf",
+          "usr/lib/reimuks/firmware/audio.sha256",
+          "usr/lib/reimuks/firmware/modem.sha256",
+          "usr/lib/reimuks/firmware/touchscreen.sha256",
+          "usr/lib/reimuks/firmware/wcn.sha256",
+          "etc/systemd/system/ModemManager.service.d/10-w202-runtime-order.conf",
+          "usr/libexec/w202-hall-input",
+          "usr/libexec/w202-torch-control",
+          "usr/lib/reimuks/deployment-requirements.json"
+        ],
+        "executables": [
+          "usr/libexec/w202-usb-gadget",
+          "usr/lib/systemd/system-sleep/w202-wcn",
+          "usr/libexec/w202-hall-input",
+          "usr/libexec/w202-torch-control"
+        ],
+        "symlinks": [
+          "etc/systemd/system/timers.target.wants/w202-charging.timer",
+          "etc/systemd/system/multi-user.target.wants/w202-usb-gadget.service",
+          "etc/systemd/system/getty.target.wants/serial-getty@ttyGS0.service",
+          "etc/systemd/system/w202-vpu.service"
+        ],
+        "contains": {
+          "etc/systemd/system/serial-getty@ttyGS0.service.d/w202-usb-gadget.conf": [
+            "w202-usb-gadget.service"
+          ],
+          "etc/systemd/network/80-w202-usb.network": [
+            "192.168.77.2/24"
+          ],
+          "etc/default/w202-usb-gadget": [
+            "USB_ADDRESS=192.168.77.2/24"
+          ],
+          "etc/modprobe.d/w202-modem-ordered.conf": [
+            "blacklist trusty_virtio",
+            "blacklist trusty_ipc"
+          ],
+          "etc/systemd/system/ModemManager.service.d/10-w202-runtime-order.conf": [
+            "After=w202-modem-runtime.service"
+          ]
+        },
+        "absent": [
+          "etc/systemd/system/multi-user.target.wants/w202-charging.service",
+          "usr/libexec/w202-vpu",
+          "usr/bin/w202-vpu",
+          "usr/libexec/w202-vpu-start",
+          "usr/libexec/w202-vpu-stop",
+          "usr/libexec/w202-vpu-worker-ns",
+          "usr/lib/systemd/system/w202-vpu.service",
+          "etc/systemd/system/multi-user.target.wants/w202-vpu.service"
+        ],
+        "absent_prefixes": [
+          "opt/w202ds/vpu/android"
+        ],
+        "link_targets": {
+          "etc/systemd/system/w202-vpu.service": "/dev/null"
+        }
+      }
+    },
+    "board-de": {
+      "components": [
+        "vpu-vaapi"
+      ],
+      "files": [
+        "files/desktop-common"
+      ],
+      "services": {
+        "bluetooth.service.wants/w202-bluetooth-state.service": "w202-bluetooth-state.service",
+        "multi-user.target.wants/w202-hall-input.service": "w202-hall-input.service",
+        "multi-user.target.wants/ModemManager.service": "ModemManager.service",
+        "timers.target.wants/w202-wifi-recover.timer": "w202-wifi-recover.timer",
+        "multi-user.target.wants/iio-sensor-proxy.service": "iio-sensor-proxy.service"
+      },
+      "control_artifacts": [
+        {
+          "rootfs": "device-controls/rootfs",
+          "executables": [
+            "w202-usb-settings",
+            "w202-device-controls",
+            "w202-gnss-control",
+            "w202-bluetooth-state",
+            "w202-tablet-resync",
+            "w202-hotspot-switch",
+            "w202-hotspot-scan",
+            "w202-wifi-recover"
+          ]
+        }
+      ],
+      "verify": {
+        "files": [
+          "etc/reimuks/acceleration.json",
+          "etc/environment.d/60-w202-video.conf",
+          "usr/lib/aarch64-linux-gnu/dri/v4l2_request_drv_video.so",
+          "usr/lib/systemd/system/w202-wifi-recover.service",
+          "usr/lib/systemd/system/w202-wifi-recover.timer"
+        ],
+        "contains": {
+          "etc/environment.d/60-w202-video.conf": [
+            "LIBVA_DRIVER_NAME=v4l2_request"
+          ]
+        },
+        "symlinks": [
+          "etc/systemd/system/multi-user.target.wants/iio-sensor-proxy.service"
+        ]
+      }
+    }
+  }
+}

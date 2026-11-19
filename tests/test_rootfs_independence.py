@@ -15,18 +15,19 @@ class RootfsIndependence(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             root = base / 'kde/rootfs'
-            work = base / 'kde/work'
+            source_work = base / 'kde/work'
+            work = base / 'board/rootfs/kde/work'
             output = base / 'artifacts'
             (root / 'etc').mkdir(parents=True)
             root.chmod(0o775)
             (root / 'etc').chmod(0o775)
             (root / 'etc/shadow').write_text('root:!:0:0:99999:7:::\n')
-            work.mkdir()
-            (work / 'configured').touch()
-            (work / 'clean-rootfs-v1').touch()
-            (work / 'dpkg-audit.txt').touch()
-            (work / 'packages.tsv').write_text('')
-            (work / 'fakeroot.state').touch()
+            source_work.mkdir()
+            (source_work / 'configured').touch()
+            (source_work / 'clean-rootfs-v1').touch()
+            (source_work / 'dpkg-audit.txt').touch()
+            (source_work / 'packages.tsv').write_text('')
+            (source_work / 'fakeroot.state').touch()
 
             def archive(*args):
                 staged = work/'package-rootfs'
@@ -43,7 +44,9 @@ class RootfsIndependence(unittest.TestCase):
                  patch.object(pack.backend, 'configure_locale'), \
                  patch.object(pack.backend, 'profile_directory', return_value=base / 'kde'), \
                  patch.object(pack.backend, 'distribution_build', return_value=base), \
+                 patch.object(pack.backend, 'composition_directory', return_value=work), \
                  patch.object(pack.backend, 'artifact_directory', return_value=output), \
+                 patch.object(pack, 'validate_board_inputs'), \
                  patch.object(pack, 'install_layer_packages', return_value={}) as install, \
                  patch.object(pack, 'verify_startup', return_value={'hardware_tested': False}), \
                  patch.object(pack, 'compress_rootfs', side_effect=archive):

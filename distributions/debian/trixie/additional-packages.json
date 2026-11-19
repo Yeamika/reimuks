@@ -9,7 +9,8 @@
     "btop",
     "fastfetch",
     "vim",
-    "lazygit"
+    "lazygit",
+    "moonlight-qt"
   ],
   "repositories": [
     {
@@ -31,6 +32,16 @@
       "keyring": "trixie/keys/microsoft.asc",
       "keyring_sha256": "2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6",
       "target_keyring": "/usr/share/keyrings/reimuks-microsoft.asc"
+    },
+    {
+      "uri": "https://dl.cloudsmith.io/public/moonlight-game-streaming/moonlight-qt/deb/debian",
+      "suite": "trixie",
+      "components": [
+        "main"
+      ],
+      "keyring": "trixie/keys/moonlight.asc",
+      "keyring_sha256": "e3015be2637545f6aae825032c5d4e02b65f5b6d32010cbd4eab2cc4744d3dac",
+      "target_keyring": "/usr/share/keyrings/reimuks-moonlight.asc"
     }
   ]
 }

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+blank=/sys/class/graphics/fb0/blank
+IFS= read -r state < "$blank"
+case "$state" in
+    0) value=4; display=off ;;
+    1|2|3|4) value=0; display=on ;;
+    *) printf 'Unexpected Polaris framebuffer blank value: %s\n' "$state" >&2; exit 1 ;;
+esac
+printf '%s\n' "$value" > "$blank"
+printf 'short power key: display %s\n' "$display"

@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "w202ds-debian-niri",
+  "board": "w202ds",
+  "distribution": "debian/trixie",
+  "architecture": "arm64",
+  "layers": [
+    "kernel/w202ds/package.json",
+    "distro/debian/trixie/arm64/package.json",
+    "overlays/w202ds/arm64/hardwarepack2/package.json",
+    "de/debian/trixie/arm64/niri/package.json",
+    {
+      "id": "debian-hardware-adapter",
+      "receipt": "adapters/w202ds/debian/trixie/arm64/hardware/package.json",
+      "producer": "devices/w202ds/overlays/w202ds-hardwarepack2/debian-adapter.py",
+      "requires": [
+        "kernel",
+        "distribution",
+        "hardwarepack2"
+      ]
+    }
+  ],
+  "user_overlays": [
+    "passkey"
+  ],
+  "rootfs": {
+    "base": "distribution",
+    "kernel": "kernel",
+    "install": [
+      "desktop-niri"
+    ],
+    "adapter": "debian-hardware-adapter",
+    "device_state": "private/modem-device-complete.tar.gz"
+  }
+}

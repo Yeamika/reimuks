@@ -15,9 +15,20 @@ sys.path.insert(0, str(ROOT/'scripts'))
 import build
 import layers
 import pack
+from board_userspace import service_link
 
 
 class LayerPackages(unittest.TestCase):
+    def test_timer_policy_installs_a_systemd_unit_link(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            relative = 'timers.target.wants/w202-wifi-recover.timer'
+            service_link(root, relative, 'w202-wifi-recover.timer')
+            self.assertEqual((root/'etc/systemd/system'/relative).readlink(),
+                             Path('/usr/lib/systemd/system/w202-wifi-recover.timer'))
+            with self.assertRaises(ValueError):
+                service_link(root, relative, '../outside.timer')
+
     def test_apt_can_resolve_local_bundle_without_sources_or_downloads(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);root=base/'root';root.mkdir();cache=base/'packages'
@@ -56,6 +67,8 @@ class LayerPackages(unittest.TestCase):
                 with patch.object(build,'check_rootfs') as check, \
                      patch.object(build,'profile_directory',side_effect=lambda p:base/p), \
                      patch.object(build,'distribution_build',return_value=base), \
+                     patch.object(build,'shared_distribution',return_value=base), \
+                     patch.object(build,'composition_directory',return_value=base/'board-work'), \
                      patch.object(build,'artifact_directory',return_value=output), \
                      patch.object(build,'configure_locale'), \
                      patch.object(pack,'install_desktop',side_effect=desktop), \
@@ -79,7 +92,17 @@ class LayerPackages(unittest.TestCase):
         self.assertEqual(kde['de-common'], gnome['de-common'])
         self.assertEqual(kde['board-de']['depends'], ['reimuks-w202ds-board','reimuks-de-common'])
         self.assertIn('reimuks-de-kde', kde['board-kde']['depends'])
-        self.assertNotIn('board-de', {p['kind'] for p in layers.plan('server')})
+        server = {p['kind']:p for p in layers.plan('server')}
+        self.assertEqual(kde['board-de'], server['board-de'])
+        self.assertEqual(kde['de-common'], server['de-common'])
+        self.assertIn('reimuks-w202ds-de-compat', server['board-server']['depends'])
+        self.assertFalse(server['board-de'].get('conflicts'))
+        self.assertEqual(set(server), {'board', 'board-de', 'de-common', 'board-server'})
+        # Distribution-only server/base stays independent of the board runtime.
+        self.assertEqual(layers.desktop_plan('server'), [])
+        self.assertIn('network-manager', layers.board_dependencies('server'))
+        self.assertIn('iio-sensor-proxy', layers.board_dependencies('server'))
+        self.assertNotIn('network-manager', layers.requested_packages('server', include_board=False))
         self.assertNotIn('kde-standard', gnome['de-gnome']['depends'])
         self.assertIn('qtwayland5', kde['de-kde']['depends'])
 
@@ -108,7 +131,7 @@ class LayerPackages(unittest.TestCase):
                     layers.package_tree(root,Path(tmp)/'out','reimuks-test',[],'board')
 
     def test_standard_desktop_packages_do_not_contain_board_code(self):
-        with tempfile.TemporaryDirectory() as tmp,patch.object(build,'distribution_build',return_value=Path(tmp)), \
+        with tempfile.TemporaryDirectory() as tmp,patch.object(build,'shared_distribution',return_value=Path(tmp)), \
              patch.object(layers,'plan',side_effect=AssertionError('Board dependency in a standard DE package')):
             packages=layers.pack_de('kde',Path(tmp)/'out')
             self.assertEqual({p['package'] for p in packages},{'reimuks-de-common','reimuks-de-kde'})
@@ -118,10 +141,42 @@ class LayerPackages(unittest.TestCase):
                     self.assertFalse(any('w202' in m.name for m in archive))
                 self.assertFalse(any('w202' in name for name in p['depends']))
 
+    def test_server_common_runtime_has_no_graphical_session(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(build, 'shared_distribution', return_value=Path(tmp)):
+            packages = layers.pack_de('server', Path(tmp)/'out')
+            self.assertEqual([p['package'] for p in packages], ['reimuks-de-common'])
+            self.assertFalse(any(name.startswith(('plasma', 'gnome-shell', 'kde-standard', 'gdm3', 'sddm'))
+                                 for name in packages[0]['depends']))
+            data = subprocess.check_output(['dpkg-deb', '--fsys-tarfile', str(Path(tmp)/'out'/packages[0]['file'])])
+            with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+                self.assertFalse(any('wayland-sessions' in m.name or 'default.target' in m.name for m in archive))
+
+    def test_qt_vulkan_loader_configuration_has_one_owner_in_each_desktop(self):
+        for profile in ('kde', 'gnome'):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as tmp, \
+                    patch.object(build, 'shared_distribution', return_value=Path(tmp)):
+                output = Path(tmp) / 'out'
+                packages = layers.pack_de(profile, output)
+                owners = []
+                names = set()
+                for package in packages:
+                    data = subprocess.check_output(['dpkg-deb', '--fsys-tarfile',
+                                                    str(output / package['file'])])
+                    with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+                        files = {m.name for m in archive if not m.isdir()}
+                        self.assertFalse(names & files, 'Overlapping DE package ownership')
+                        names.update(files)
+                        path = './etc/environment.d/60-reimuks-qt-vulkan.conf'
+                        if path in files:
+                            owners.append(package['package'])
+                            text = archive.extractfile(path).read().decode()
+                            self.assertIn('QT_VULKAN_LIB=${QT_VULKAN_LIB:-libvulkan.so.1}', text)
+                self.assertEqual(owners, ['reimuks-de-common'])
+
     def test_board_packages_have_disjoint_files_and_no_context_leak(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);board=base/'board';(board/'rootfs').mkdir(parents=True)
-            config=json.loads((ROOT/'devices/w202ds/rootfs/packages.json').read_text())
+            config=json.loads((ROOT/'config/boards/w202ds/packages.json').read_text())
             (board/'rootfs/packages.json').write_text(json.dumps(config))
             policy={'schema':1,'common':{},'desktop_common':{},'profiles':{'desktop/kde':{'desktop_common':True}}}
             (board/'rootfs/policy.json').write_text(json.dumps(policy))

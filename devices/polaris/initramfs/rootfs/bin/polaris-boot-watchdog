@@ -1,0 +1,75 @@
+#!/bin/busybox sh
+# The kernel extends the boot window; userspace feeds only while init progresses.
+wd_dir=${POLARIS_WATCHDOG_STATE_DIR:-/run/reimuks/watchdog}
+wd_device=${POLARIS_WATCHDOG_DEVICE:-/dev/watchdog0}
+wd_cmdline=${POLARIS_WATCHDOG_CMDLINE:-/proc/cmdline}
+wd_log() { [ ! -c /dev/kmsg ] || printf '<6>reimuks-watchdog: %s\n' "$*" >/dev/kmsg; }
+wd_now() { read -r wd_time wd_rest </proc/uptime; printf '%s\n' "${wd_time%%.*}"; }
+wd_tick() {
+    [ -f "$wd_dir/pid" ] || return 0
+    printf '%s %s\n' "$(wd_now)" "${1:-progress}" >"$wd_dir/lease.$$" && mv "$wd_dir/lease.$$" "$wd_dir/lease"
+}
+case "${1:-}" in
+start)
+    budget=180; lease=20
+    for arg in $(cat "$wd_cmdline"); do
+        case "$arg" in
+            reimuks.watchdog=*) budget=${arg#*=} ;;
+            reimuks.watchdog.lease=*) lease=${arg#*=} ;;
+        esac
+    done
+    case "$budget:$lease" in *[!0-9:]*|:*) exit 1 ;; esac
+    [ "$budget" -ge 5 ] && [ "$budget" -le 3600 ] && [ "$lease" -ge 2 ] && [ "$lease" -le 30 ] || exit 1
+    [ -c "$wd_device" ] || { wd_log 'watchdog device unavailable'; exit 1; }
+    mkdir -p "$wd_dir"
+    if [ -f "$wd_dir/pid" ] && kill -0 "$(cat "$wd_dir/pid")" 2>/dev/null; then exit 0; fi
+    rm -f "$wd_dir/armed" "$wd_dir/ready"
+    started=$(wd_now)
+    printf '%s start\n' "$started" >"$wd_dir/lease"
+    sh "$0" run "$started" "$budget" "$lease" </dev/null >/dev/null 2>&1 &
+    echo "$!" >"$wd_dir/pid"
+    n=0
+    while [ "$n" -lt 30 ]; do
+        [ ! -f "$wd_dir/armed" ] || exit 0
+        kill -0 "$(cat "$wd_dir/pid")" 2>/dev/null || exit 1
+        sleep 0.1;n=$((n+1))
+    done
+    exit 1
+    ;;
+run)
+    started=$2;budget=$3;lease=$4
+    exec 9>"$wd_device" || exit 1
+    # Close without magic-close: hardware protects switch_root until PID 1 opens it.
+    trap 'printf . >&9;exec 9>&-;rm -f "$wd_dir/armed" "$wd_dir/pid";exit 0' USR1
+    : >"$wd_dir/armed"
+    wd_log "armed; boot window=${budget}s progress lease=${lease}s"
+    while :; do
+        now=$(wd_now);stamp=0;stage=unknown
+        read -r stamp stage <"$wd_dir/lease" || stamp=0
+        case "$stamp" in ''|*[!0-9]*) stamp=0 ;; esac
+        reason=
+        if [ ! -f "$wd_dir/ready" ] && [ "$((now-started))" -ge "$budget" ]; then reason=boot-window-expired;fi
+        if [ "$stamp" -gt "$now" ] || [ "$((now-stamp))" -ge "$lease" ]; then reason=progress-stalled;fi
+        if [ -n "$reason" ]; then
+            wd_log "$reason at $stage; returning to firmware"
+            reboot -f
+            # Keep the descriptor open and stop feeding if software reboot fails.
+            while :;do sleep 60;done
+        fi
+        printf . >&9 || break
+        # Children must not keep the watchdog busy after the daemon hands off.
+        sleep 1 9>&-
+    done
+    while :;do sleep 60;done
+    ;;
+tick) wd_tick "${2:-progress}" ;;
+ready) [ ! -d "$wd_dir" ] || { : >"$wd_dir/ready";wd_tick initramfs-ready; } ;;
+handoff)
+    [ -f "$wd_dir/pid" ] || exit 0
+    kill -USR1 "$(cat "$wd_dir/pid")" || exit 1
+    n=0
+    while [ -f "$wd_dir/armed" ] && [ "$n" -lt 50 ];do sleep 0.1;n=$((n+1));done
+    [ ! -f "$wd_dir/armed" ]
+    ;;
+*) exit 2 ;;
+esac

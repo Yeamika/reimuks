@@ -1,0 +1,10 @@
+[Unit]
+Description=Record Polaris native DRM display state
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/polaris-display-status
+
+[Install]
+WantedBy=multi-user.target

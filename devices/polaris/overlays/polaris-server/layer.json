@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "id": "polaris-server",
+  "kind": "server-profile",
+  "build": "build.py",
+  "package": "package.py",
+  "policies": {
+    "board-profile": {
+      "files": ["files"],
+      "services": {
+        "getty.target.wants/serial-getty@ttyGS0.service": "serial-getty@.service",
+        "getty.target.wants/getty@tty1.service": "getty@.service",
+        "multi-user.target.wants/reimuks-powerkey.service": "reimuks-powerkey.service"
+      },
+      "verify": {
+        "contains": {
+          "etc/systemd/system/serial-getty@ttyGS0.service.d/10-gadget.conf": [
+            "polaris-usb-gadget.service"
+          ],
+          "usr/libexec/polaris-login-console": [
+            "polaris_console_fullscreen",
+            "1080,2160",
+            "/sys/class/graphics/fb0/blank",
+            "printf '0\\n'"
+          ],
+          "etc/systemd/system/getty@tty1.service.d/20-polaris-fullscreen.conf": [
+            "polaris-login-console",
+            "polaris-display-status.service"
+          ],
+          "usr/lib/reimuks/powerkey-board.env": ["REIMUKS_POWERKEY_INPUT_NAME=pm8941_pwrkey"],
+          "etc/default/reimuks-powerkey": [
+            "REIMUKS_POWERKEY_SHORT_ACTION=display-toggle",
+            "REIMUKS_POWERKEY_LONG_ACTION=ignore"
+          ]
+        },
+        "executables": [
+          "usr/libexec/polaris-login-console",
+          "usr/libexec/reimuks-powerkey"
+        ],
+      "files": ["etc/default/reimuks-powerkey"],
+        "symlinks": [
+          "etc/systemd/system/multi-user.target.wants/reimuks-powerkey.service"
+        ]
+      },
+      "rootfs_artifacts": []
+    }
+  }
+}

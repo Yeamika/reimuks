@@ -9,6 +9,28 @@ import struct
 import zlib
 
 
+def boot_options(options, kernel_config=None):
+    """Preserve Kbuild defaults when nonempty EFI options replace them.
+
+    ARM64 CMDLINE_FROM_BOOTLOADER selects the complete firmware command line;
+    appending only systemd.unit would otherwise discard console/clock policy.
+    CMDLINE_EXTEND already performs this merge inside the kernel.
+    """
+    if kernel_config is not None:
+        values = dict(line.split('=', 1) for line in kernel_config.read_text().splitlines()
+                      if line.startswith('CONFIG_') and '=' in line)
+        if options and values.get('CONFIG_CMDLINE_FORCE') == 'y':
+            raise ValueError('CONFIG_CMDLINE_FORCE prevents EFI boot options')
+        if values.get('CONFIG_CMDLINE_EXTEND') != 'y':
+            defaults = json.loads(values.get('CONFIG_CMDLINE', '""'))
+            if not isinstance(defaults, str):
+                raise ValueError('invalid CONFIG_CMDLINE')
+            options = ' '.join(value for value in (defaults, options) if value)
+    if len(options) >= 1024 or any(ord(c) < 32 or ord(c) > 126 for c in options):
+        raise ValueError('options must be a single ASCII line shorter than 1024 bytes')
+    return options
+
+
 def assemble(image, initrd, dtb, partuuid):
     if not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', partuuid):
         raise ValueError('root PARTUUID must be a canonical GPT UUID')
@@ -36,15 +58,20 @@ def assemble(image, initrd, dtb, partuuid):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--profile', choices=['server', 'kde'], required=True)
+    entries = {'server': 'DebianServer', 'kde': 'DebianKDE', 'gnome': 'DebianGNOME'}
+    p.add_argument('--profile', choices=entries, required=True)
     for name in ('image', 'initrd', 'dtb', 'output'):
         p.add_argument('--'+name, type=Path, required=True)
     p.add_argument('--root-partuuid', required=True)
     p.add_argument('--options', default='', help='kernel boot options, including systemd.unit if required')
+    p.add_argument('--kernel-config', type=Path,
+                   help='matching kernel .config; retain its default command line before EFI options')
     p.add_argument('--legacy', action='store_true', help='emit the combined boot.img format for old EFI loaders')
     a = p.parse_args()
-    if len(a.options) >= 1024 or any(ord(c) < 32 or ord(c) > 126 for c in a.options):
-        p.error('options must be a single ASCII line shorter than 1024 bytes')
+    try:
+        a.options = boot_options(a.options, a.kernel_config)
+    except (OSError, ValueError) as error:
+        p.error(str(error))
     image, initrd, dtb = (f.read_bytes() for f in (a.image, a.initrd, a.dtb))
     boot, meta = assemble(image, initrd, dtb, a.root_partuuid)
     # One output directory per profile avoids silently mixing shared DTBs.
@@ -66,7 +93,7 @@ def main():
         for name in previous['files']:
             (a.output/name).unlink(missing_ok=True)
     a.output.mkdir(parents=True, exist_ok=True)
-    profile = a.output/'EFI'/('DebianServer' if a.profile == 'server' else 'DebianKDE')
+    profile = a.output/'EFI'/entries[a.profile]
     profile.mkdir(parents=True, exist_ok=True)
     common = a.output/'EFI'/'W202DS'
     common.mkdir(exist_ok=True)
@@ -88,6 +115,7 @@ def main():
         'files': {str(path.relative_to(a.output)): hashlib.sha256(data).hexdigest()
                   for path, data in outputs.items()},
         'format': 'legacy' if a.legacy else 'linuxboot.conf',
+        'kernel_options': a.options,
         'note': 'Payload only; requires matching separately built LinuxBoot EFI. CRC is not authentication.'
     }, indent=2)+'\n')
 

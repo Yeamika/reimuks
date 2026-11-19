@@ -12,6 +12,19 @@ def relative_path(root, value):
     return result
 
 
+def output_path(root, value, declared):
+    """Allow an explicitly declared output link, retaining containment below it."""
+    path, prefix = Path(value), Path(declared)
+    if (path.is_absolute() or prefix.is_absolute() or '..' in path.parts or
+            '..' in prefix.parts or not prefix.parts):
+        raise ValueError(f'Invalid board output path: {value}')
+    try:
+        relative = path.relative_to(prefix)
+    except ValueError:
+        raise ValueError(f'Artifact outside declared board output: {value}') from None
+    return relative_path((root/prefix).resolve(), relative)
+
+
 def manifest(board):
     config = json.loads((board / 'board.json').read_text())
     reference = config.get('userspace_manifest')

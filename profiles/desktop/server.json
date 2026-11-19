@@ -1,4 +1,4 @@
 {
   "target": "multi-user.target",
-  "locale": "zh_CN.UTF-8"
+  "locale": "C.UTF-8"
 }

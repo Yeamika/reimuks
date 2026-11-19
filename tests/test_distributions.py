@@ -79,15 +79,15 @@ class DistributionTest(unittest.TestCase):
         self.assertNotIn('code', server['packages'])
         self.assertNotIn('dl.google.com', registry.sources_list(self.distro, profile='server'))
 
-    def test_kde_login_and_session_do_not_start_x_servers(self):
+    def test_kde_wayland_session_keeps_standard_helper_compatibility(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             build.configure_display('kde', root)
             login = (root/'etc/sddm.conf.d/20-reimuks-wayland.conf').read_text()
             self.assertIn('DisplayServer=wayland', login)
+            self.assertNotIn('--xwayland', login)
             service = (root/'etc/systemd/user/plasma-kwin_wayland.service.d/20-reimuks-wayland.conf').read_text()
-            self.assertIn('ExecStart=\nExecStart=/usr/bin/kwin_wayland_wrapper\n', service)
-            self.assertNotIn('--xwayland', service)
+            self.assertIn('ExecStart=\nExecStart=/usr/bin/kwin_wayland_wrapper --xwayland\n', service)
 
     def test_fetch_uses_each_profiles_recommendation_policy(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -190,7 +190,7 @@ class DistributionTest(unittest.TestCase):
         other['id'] = 'debian/bookworm'
         other['suite'] = 'bookworm'
         other['build_repositories'] = [{'uri': 'https://mirror.example/debian', 'suite': 'bookworm'}]
-        with tempfile.TemporaryDirectory() as tmp, patch.object(build, 'BUILD', Path(tmp)), \
+        with tempfile.TemporaryDirectory() as tmp, patch.object(build, 'SHARED_BUILD', Path(tmp)), \
                 patch.object(build, 'DISTRIBUTION', other):
             state = build.apt_state('apt-kde', 'arm64')
             self.assertTrue(state.is_relative_to(Path(tmp)/'distributions/debian/bookworm'))

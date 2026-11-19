@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "host_suite": "bookworm",
+  "host_mirror": "http://deb.debian.org/debian",
   "host_architecture": "amd64",
   "packages": [
     "gcc-aarch64-linux-gnu",
@@ -17,11 +18,11 @@
   "rust_toolchain": "1.93.0",
   "bootstrap": {
     "archive_keyring": {
-      "url": "https://ftp.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb",
+      "url": "http://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb",
       "sha256": "9ea7778e443144ca490668737a8ab22dd3e748bb99e805e22ec055abeb3c7fac"
     },
     "proot": {
-      "url": "https://api.github.com/repos/proot-me/proot/releases/assets/606356115",
+      "url": "https://github.com/proot-me/proot/releases/download/v5.5.0/proot",
       "sha256": "db185300a9daabbce86aca7632d8c7fdc4249f6f153171954013b70c5f491ec0"
     }
   }

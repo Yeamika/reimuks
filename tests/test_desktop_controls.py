@@ -17,9 +17,12 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/'scripts'))
+from output_paths import board_root
 DEVICES = ROOT/'devices/w202ds/kernel/Devices'
-SOURCE = ROOT/'devices/w202ds/desktop/common/device-controls/source'
-KDE = ROOT/'devices/w202ds/desktop/kde/session'
+SOURCE = ROOT/'devices/w202ds/overlays/w202ds-hardwarepack2/src/device-controls/source'
+KDE = ROOT/'devices/w202ds/overlays/w202ds-kde-hardwareuipack/src/kde/session'
+GNOME = ROOT/'devices/w202ds/overlays/w202ds-gnome-hardwareuipack/src/gnome/session'
 
 
 class NativeControlsTest(unittest.TestCase):
@@ -28,15 +31,16 @@ class NativeControlsTest(unittest.TestCase):
         cls.cc = os.environ.get('W202_NATIVE_CC') or shutil.which('cc')
         if not cls.cc:
             raise unittest.SkipTest('Set W202_NATIVE_CC to a native C compiler')
-        cls.out = ROOT/'build/device-controls/tests'
+        cls.out = board_root('w202ds')/'device-controls/tests'
         cls.out.mkdir(parents=True, exist_ok=True)
         include = DEVICES/'userspace-common/source'
         flags = ['-std=gnu11', '-O1', '-g', '-DW202_TESTING', '-Wall', '-Wextra',
-                 '-Werror', '-Wno-unused-function', '-Wno-misleading-indentation',
+                 '-Werror', '-Wno-error=unused-result', '-Wno-unused-function', '-Wno-misleading-indentation',
                  '-I'+str(include), '-I'+str(SOURCE)]
         sources = {
             'controls': [SOURCE/'controls.c', SOURCE/'network.c'],
             'kde': [KDE/'hardware-controls.c'],
+            'gnome': [GNOME/'controls.c'],
             'gnss-control': [SOURCE/'gnss-control.c'],
             'power': [DEVICES/'charging/userspace/source/w202-power-control.c'],
             'torch': [DEVICES/'camera/userspace/source/w202-torch-control.c'],
@@ -46,6 +50,7 @@ class NativeControlsTest(unittest.TestCase):
             'hotspot': [SOURCE/'hotspot.c'],
             'gnss-session': [DEVICES/'wcn/userspace/gnss/w202ds-gnss.c'],
             'storage': [ROOT/'tests/native/test-storage.c'],
+            'bluetooth-radio': [ROOT/'tests/native/test-bluetooth-radio.c'],
         }
         flags += ['-I'+str(DEVICES/'wcn/userspace/gnss'),
                   '-I'+str(DEVICES/'hall/userspace/source'),
@@ -82,6 +87,16 @@ elif name=='pkexec': sys.exit(1 if s.get('denied') else 0)
 elif name=='w202-device-controls': print(json.dumps(s['shared'])); sys.exit(0 if s['shared'].get('ok') else 1)
 elif name=='w202-rotation': print(json.dumps(s['rotation']))
 elif name=='w202-tablet-mode': pass
+elif name=='gsettings':
+    if s.get('settings_missing'): sys.exit(1)
+    operation,schema,key=sys.argv[1:4]
+    values=s.setdefault('settings',{'orientation-lock':False,'screen-keyboard-enabled':False})
+    if operation=='writable': print('false' if s.get('settings_readonly') else 'true')
+    elif operation=='get': print('true' if values[key] else 'false')
+    elif operation=='set':
+        if s.get('settings_denied'): sys.exit(1)
+        if not s.get('settings_ignored'): values[key]=sys.argv[4]=='true'
+        pathlib.Path(os.environ['W202_FAKE_STATE']).write_text(json.dumps(s))
 elif name=='systemctl':
     if 'show' in sys.argv: print(s.get('service','inactive'))
 else:
@@ -89,7 +104,7 @@ else:
     if s.get('no_'+key):sys.exit(1)
     print(json.dumps(s[key]))
 '''.replace('INTERPRETER', sys.executable)
-        for name in ('usr/bin/busctl','usr/bin/pkexec','usr/bin/systemctl','usr/bin/w202-rotation',
+        for name in ('usr/bin/busctl','usr/bin/pkexec','usr/bin/systemctl','usr/bin/w202-rotation','usr/bin/gsettings',
                      'usr/libexec/w202-power-control','usr/libexec/w202-gnss-control',
                      'usr/libexec/w202-torch-control','usr/libexec/w202-device-controls',
                      'usr/libexec/w202-tablet-mode'):
@@ -103,6 +118,27 @@ else:
         p = subprocess.run([str(self.out/name), action], env=self.env,
                            capture_output=True, text=True, timeout=15)
         return p, json.loads(p.stdout)
+
+    def test_bluetooth_restore_unblocks_only_its_controller_and_respects_hardware(self):
+        directory = self.path/'sys/class/rfkill'
+        devices = [('hci0', 'bluetooth'), ('hci1', 'bluetooth'),
+                   ('phy0', 'wlan'), ('w202ds-gnss', 'gps')]
+        for i, (name, kind) in enumerate(devices):
+            node = directory/f'rfkill{i}'
+            node.mkdir(parents=True)
+            for key, value in [('name', name), ('type', kind), ('soft', '1'), ('hard', '0')]:
+                (node/key).write_text(value)
+        binary = str(self.out/'bluetooth-radio')
+        result = subprocess.run([binary, '/org/bluez/hci0'], env=self.env)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual((directory/'rfkill0/soft').read_text(), '0')
+        for i in range(1, len(devices)):
+            self.assertEqual((directory/f'rfkill{i}/soft').read_text(), '1')
+        (directory/'rfkill0/soft').write_text('1')
+        (directory/'rfkill0/hard').write_text('1')
+        self.assertNotEqual(subprocess.run([binary, '/org/bluez/hci0'], env=self.env).returncode, 0)
+        self.assertEqual((directory/'rfkill0/soft').read_text(), '1')
+        self.assertNotEqual(subprocess.run([binary, '/org/bluez/hci0/../hci1'], env=self.env).returncode, 0)
 
     def test_missing_is_not_off_and_independent_controls_survive(self):
         self.state.update(no_power=True, no_bus=True)
@@ -147,6 +183,70 @@ else:
         self.assertEqual(p.returncode,0)
         calls=[json.loads(x) for x in self.log.read_text().splitlines()]
         self.assertTrue(any(x[1:]==['on'] and x[0].endswith('w202-tablet-mode') for x in calls))
+
+    def test_de_adapters_keep_the_same_hardware_payload_and_future_fields(self):
+        _, self.state['shared'] = self.run_control('controls', 'status')
+        self.state['shared']['extension'] = {'version': 2, 'values': [None, 17]}
+        for name in ('kde', 'gnome'):
+            with self.subTest(adapter=name):
+                p, value = self.run_control(name, 'wifi-off')
+                self.assertEqual(p.returncode, 0, p.stderr)
+                for field in ('power', 'torch', 'usb', 'protocol', 'extension'):
+                    self.assertEqual(value[field], self.state['shared'][field])
+                for key, state in self.state['shared']['states'].items():
+                    self.assertEqual(value['states'][key], state)
+
+    def test_gnome_rotation_uses_the_inverse_lock_and_keyboard_uses_gnome(self):
+        _, self.state['shared'] = self.run_control('controls', 'status')
+        self.log.unlink()
+        for action, key, expected in (('rotation-off', 'orientation-lock', True),
+                                      ('rotation-on', 'orientation-lock', False),
+                                      ('keyboard-on', 'screen-keyboard-enabled', True),
+                                      ('keyboard-off', 'screen-keyboard-enabled', False)):
+            with self.subTest(action=action):
+                p, value = self.run_control('gnome', action)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(json.loads(self.state_path.read_text())['settings'][key], expected)
+                self.assertIsNone(value['states']['tablet'])
+                if key == 'orientation-lock':
+                    self.assertEqual(value['states']['rotation'], not expected)
+                else:
+                    self.assertEqual(value['states']['keyboard'], expected)
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertFalse(any(any('org.kde' in arg or 'w202-rotation' in arg for arg in call) for call in calls))
+        self.assertFalse(any(call[0].endswith('pkexec') for call in calls))
+
+    def test_gnome_missing_or_rejected_setting_is_not_reported_as_success(self):
+        _, self.state['shared'] = self.run_control('controls', 'status')
+        self.state['settings_missing'] = True
+        p, value = self.run_control('gnome', 'status')
+        self.assertEqual(p.returncode, 0)
+        self.assertIsNone(value['states']['rotation'])
+        self.assertIsNone(value['states']['keyboard'])
+        self.assertFalse(value['capabilities']['rotation']['available'])
+        self.state.pop('settings_missing')
+        for failure in ('settings_readonly', 'settings_denied', 'settings_ignored'):
+            with self.subTest(failure=failure):
+                self.state[failure] = True
+                p, value = self.run_control('gnome', 'keyboard-on')
+                self.assertNotEqual(p.returncode, 0)
+                self.assertFalse(value['ok'])
+                self.state.pop(failure)
+
+    def test_gnome_does_not_fake_a_manual_tablet_override(self):
+        p, value = self.run_control('gnome', 'tablet-on')
+        self.assertNotEqual(p.returncode, 0)
+        self.assertFalse(value['ok'])
+        self.assertFalse(self.log.exists())
+
+    def test_adapters_reject_malformed_shared_status(self):
+        for shared in ({'ok': False}, {'ok': True, 'states': [], 'capabilities': {}}):
+            self.state['shared'] = shared
+            for name in ('kde', 'gnome'):
+                with self.subTest(adapter=name, shared=shared):
+                    p, value = self.run_control(name, 'status')
+                    self.assertNotEqual(p.returncode, 0)
+                    self.assertFalse(value['ok'])
 
     def test_gnss_does_not_steal_another_session(self):
         self.env['W202_TEST_ROOT']='1'

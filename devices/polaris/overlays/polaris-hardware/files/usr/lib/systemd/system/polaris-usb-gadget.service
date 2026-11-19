@@ -1,0 +1,13 @@
+[Unit]
+Description=Polaris USB serial console transport
+After=systemd-modules-load.service sys-kernel-config.mount
+Before=serial-getty@ttyGS0.service
+ConditionPathExists=/sys/firmware/devicetree/base
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/polaris-usb-gadget
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

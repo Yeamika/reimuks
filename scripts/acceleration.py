@@ -12,7 +12,7 @@ def install(root, profile, distribution):
         for relative in ('usr/bin/reimuks-chrome', 'etc/skel/.local/share/applications/google-chrome.desktop'):
             (root/relative).unlink(missing_ok=True)
         return
-    source = Path(__file__).resolve().parents[1]/'distributions'/distribution['id']/'rootfs'
+    source = Path(__file__).resolve().parents[1]/'overlays/apps/remote/files'
     from board_userspace import install_template
     install_template(root, source)
     desktop = root/'usr/share/applications/google-chrome.desktop'

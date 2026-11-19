@@ -1,0 +1,32 @@
+#!/bin/sh
+# Report the actual native connector/driver; EFI console retirement alone is
+# not proof that native DRM successfully registered or displayed its first frame.
+set -eu
+mkdir -p /run/reimuks
+report=/run/reimuks/display-status
+: >"$report"
+n=0
+while [ "$n" -lt 20 ]; do
+    [ ! -x /bin/polaris-boot-watchdog ] || /bin/polaris-boot-watchdog tick wait-drm-connector
+    for connector in /sys/class/drm/card*-DSI-*; do
+        [ -r "$connector/status" ] || continue
+        card=${connector##*/}; card=${card%%-*}
+        driver=$(readlink -f "/sys/class/drm/$card/device/driver" || true)
+        case "${driver##*/}" in msm|msm_drm|msm_dpu) ;; *) continue ;; esac
+        {
+            printf 'connector=%s\ndriver=%s\nstatus=' "${connector##*/}" "${driver##*/}"
+            cat "$connector/status"
+            printf 'modes:\n'; cat "$connector/modes"
+            for fb in /sys/class/graphics/fb*; do
+                [ -r "$fb/name" ] && { printf 'fb='; cat "$fb/name"; }
+            done
+        } >"$report"
+        cat "$report"
+        grep -qx connected "$connector/status"
+        exit
+    done
+    sleep 1
+    n=$((n+1))
+done
+echo 'native DRM DSI connector unavailable' | tee "$report"
+exit 1

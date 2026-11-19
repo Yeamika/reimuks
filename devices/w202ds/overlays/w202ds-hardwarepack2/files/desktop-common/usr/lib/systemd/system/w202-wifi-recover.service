@@ -1,0 +1,16 @@
+[Unit]
+Description=Recover stale W202DS supplicant driver binding
+After=NetworkManager.service w202-wifi.service
+ConditionPathExists=/sys/class/net/wlan0/phy80211
+ConditionPathExists=/run/wpa_supplicant/wlan0
+ConditionPathExists=!/run/w202-wcn-sleep
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/w202-wifi-recover
+TimeoutStartSec=20
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=-/run/wpa_supplicant

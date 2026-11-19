@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "board": {
+    "selector": "board",
+    "package": "reimuks-polaris-board",
+    "depends": ["systemd", "udev", "busybox-static", "kmod", "firmware-qcom-soc", "firmware-atheros"]
+  },
+  "profiles": {
+    "server": {
+      "selector": "board-profile",
+      "package": "reimuks-polaris-server",
+      "depends": ["reimuks-polaris-board"]
+    }
+  }
+}

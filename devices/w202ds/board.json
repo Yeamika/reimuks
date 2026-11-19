@@ -21,7 +21,7 @@
     "bin/w202-usb-gadget": "usb-gadget"
   },
   "initramfs_policy_files": {
-    "etc/default/w202-usb-gadget": "rootfs/common/etc/default/w202-usb-gadget"
+    "etc/default/w202-usb-gadget": "overlays/w202ds-hardwarepack2/files/common/etc/default/w202-usb-gadget"
   },
   "kernel_builder": "kernel/scripts/build.py",
   "module_requirements": {
@@ -44,7 +44,7 @@
       "cmdline root="
     ]
   },
-  "integration_builder": "build.py",
+  "integration_builder": "../../scripts/overlay-build.py",
   "kernel_exporter": "kernel/scripts/runtime-export.py",
   "kernel_runtime": "kernel/output/runtime-{profile}"
 }

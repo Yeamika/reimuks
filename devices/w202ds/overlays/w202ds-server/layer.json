@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "w202ds-server",
+  "kind": "server-profile",
+  "policies": {
+    "board-profile": {
+      "files": ["files/server"],
+      "services": {
+        "multi-user.target.wants/w202-display-login.service": "w202-display-login.service"
+      },
+      "disable": ["multi-user.target.wants/systemd-networkd.service"],
+      "verify": {
+        "absent": ["etc/systemd/system/multi-user.target.wants/systemd-networkd.service"]
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+for hook in /usr/lib/reimuks/console-prepare.d/*; do
+    [ -x "$hook" ] || continue
+    "$hook"
+done
+printf '\033[H\033[2J\033[3J' > /dev/tty1
+systemctl --no-block restart getty@tty1.service

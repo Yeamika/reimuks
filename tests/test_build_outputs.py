@@ -71,13 +71,14 @@ class BootOutputTest(unittest.TestCase):
         board = self.root/'devices/test'
         (board/'boot').mkdir(parents=True)
         (board/'boot/build.py').touch()
-        work = self.root/'build/boot/test'
+        work = self.root/'build/boards/test/boot/work'
         calls = []
-        def compile(argv, check):
+        def compile(argv, check, env):
             directory = Path(argv[argv.index('--output')+1])
             calls.append(directory)
             self.assertEqual(directory, work)
             self.assertFalse(directory.exists())
+            self.assertEqual(Path(env['TMPDIR']), work.parent/'tmp')
             self.deliver('uefi', {'firmware.img': str(len(calls)).encode()}, directory)
         with patch.object(boot, 'REPO', self.root), patch.object(boot.subprocess, 'run', compile):
             for _ in range(2):
@@ -93,8 +94,8 @@ class BootOutputTest(unittest.TestCase):
         (board/'boot/build.py').touch()
         self.deliver('uefi', {'firmware.img': b'old'})
         boot.publish(self.work, self.output)
-        work = self.root/'build/boot/test'
-        def fail(argv, check):
+        work = self.root/'build/boards/test/boot/work'
+        def fail(argv, check, env):
             work.mkdir()
             (work/'error.log').write_text('build failed')
             raise subprocess.CalledProcessError(1, argv)

@@ -1,0 +1,93 @@
+#!/bin/busybox sh
+set -eu
+/bin/busybox --install -s /bin
+log() {
+    [ ! -x /bin/polaris-boot-watchdog ] || /bin/polaris-boot-watchdog tick "$*"
+    printf '<6>reimuks-polaris: %s\n' "$*" >/dev/kmsg
+}
+mkdir -p /run/reimuks
+drm=1
+pause=0
+recover=0
+logpart=
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        reimuks.drm=0) drm=0 ;;
+        reimuks.break=initramfs) pause=1 ;;
+        reimuks.recover=1) recover=1 ;;
+        reimuks.logpart=PARTUUID=*) logpart=${arg#reimuks.logpart=} ;;
+    esac
+done
+# Opt-in diagnostic writes to an explicitly selected FAT volume. This does not
+# mount the Linux rootfs; the installer must create the diagnostics directory.
+save_log() {
+    [ -n "$logpart" ] || return 0
+    case "${logpart#PARTUUID=}" in
+        *[!0-9a-fA-F-]*|'') log 'invalid diagnostic PARTUUID';return 0 ;;
+    esac
+    device=$(blkid -l -t "$logpart" -o device 2>/dev/null) || return 0
+    [ -b "$device" ] || return 0
+    dest=/run/reimuks/log-volume
+    mkdir -p "$dest"
+    if ! mount -t vfat -o rw,nodev,nosuid,noexec "$device" "$dest"; then return 0; fi
+    directory=$dest/EFI/LinuxBoot/diagnostics
+    if [ -d "$directory" ] && [ -f "$dest/EFI/LinuxBoot/Image.efi" ]; then
+        dmesg >"$directory/dmesg.txt.new" && mv "$directory/dmesg.txt.new" "$directory/dmesg.txt"
+        cat /proc/cmdline >"$directory/cmdline.txt"
+        cat /run/reimuks/usb.log >"$directory/usb.txt"
+        { uname -a; cat /proc/uptime /proc/consoles; ls -l /sys/class/udc /sys/class/drm; } >"$directory/devices.txt"
+        log 'saved initramfs diagnostics to ESP'
+    fi
+    sync
+    umount "$dest"
+}
+log "initramfs alive; kernel $(uname -r)"
+usb=0
+if /bin/polaris-usb-gadget >/run/reimuks/usb.log 2>&1; then
+    usb=1
+    log 'USB serial ready'
+else
+    log 'USB serial unavailable; see /run/reimuks/usb.log'
+    while IFS= read -r line; do log "USB: $line"; done </run/reimuks/usb.log
+    if [ -d /sys/kernel/debug ]; then
+        mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+        if [ -r /sys/kernel/debug/devices_deferred ]; then
+            cat /sys/kernel/debug/devices_deferred >/run/reimuks/deferred.txt
+            while IFS= read -r line; do log "deferred: $line"; done </run/reimuks/deferred.txt
+        fi
+    fi
+fi
+mdev -s
+if [ "$drm" = 1 ]; then
+    log 'requesting native MSM DRM takeover'
+    if modprobe msm >/run/reimuks/drm-load.log 2>&1; then
+        /bin/polaris-display-status >/run/reimuks/drm.log 2>&1 && log 'native DSI connector ready' || log 'DRM connector pending; inspect /run/reimuks/drm.log'
+    else
+        log 'MSM DRM module failed; inspect /run/reimuks/drm-load.log'
+    fi
+fi
+save_log || log 'ESP diagnostic save failed'
+if [ "$pause" = 1 ]; then
+    log "initramfs checkpoint; USB ready=$usb, rootfs has not been mounted"
+    if [ "$usb" = 0 ] && [ "$recover" = 1 ]; then
+        log 'USB unavailable; returning to firmware after saving diagnostics'
+        sleep 3
+        reboot -f
+        while :; do sleep 60; done
+    fi
+    /bin/polaris-boot-watchdog ready
+    while :; do
+        if [ -c /dev/ttyGS0 ]; then
+            setsid sh -c 'exec cttyhack sh </dev/ttyGS0 >/dev/ttyGS0 2>&1' &
+        else
+            setsid cttyhack sh &
+        fi
+        shell_pid=$!
+        while kill -0 "$shell_pid" 2>/dev/null; do
+            /bin/polaris-boot-watchdog tick initramfs-console
+            sleep 3
+        done
+        wait "$shell_pid" || true
+        sleep 1
+    done
+fi

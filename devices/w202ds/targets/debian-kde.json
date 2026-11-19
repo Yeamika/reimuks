@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "w202ds-debian-kde",
+  "board": "w202ds",
+  "distribution": "debian/trixie",
+  "architecture": "arm64",
+  "layers": [
+    "kernel/w202ds/package.json",
+    "distro/debian/trixie/arm64/package.json",
+    "overlays/w202ds/arm64/hardwarepack2/package.json",
+    "de/debian/trixie/arm64/kde/package.json",
+    "overlays/w202ds/arm64/kde-ui/package.json",
+    "adapters/w202ds/debian/trixie/arm64/kde/package.json"
+  ]
+}

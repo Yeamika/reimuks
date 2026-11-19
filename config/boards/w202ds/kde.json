@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "board": "w202ds",
+  "profile": "desktop/kde",
+  "kernel": "w202ds-kernel",
+  "overlays": ["w202ds-hardwarepack2", "services/powerkey", "w202ds-kde-hardwareuipack"],
+  "package_profile": "kde",
+  "builder": "w202ds-hardwarepack2"
+}

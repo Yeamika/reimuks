@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "w202ds-debian-kde-remote",
+  "board": "w202ds",
+  "distribution": "debian/trixie",
+  "architecture": "arm64",
+  "extends": "debian-kde.json",
+  "app_overlays": [
+    "tui-app-basic",
+    "remote"
+  ],
+  "user_overlays": [
+    "passkey",
+    "kde-theme"
+  ],
+  "rootfs": {
+    "profile": "kde",
+    "base": "distribution",
+    "kernel": "kernel",
+    "install": [
+      "desktop-kde"
+    ],
+    "adapter": "debian-kde-adapter",
+    "device_state": "private/modem-device-complete.tar.gz"
+  }
+}

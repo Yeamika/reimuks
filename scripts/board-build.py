@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 from kernel import tool_environment
-from board_exports import manifest, relative_path
+from board_exports import manifest, relative_path, output_path
 
 
 def main():
@@ -39,7 +39,7 @@ def main():
         print('Hardware producer inputs checked.')
         return
     command = list(build['command'])
-    output = relative_path(root, build['output'])
+    output = output_path(root, build['output'], build['output'])
     # Sources, compiler and output are explicit inputs; never invoke services.
     subprocess.run([*command, 'all', 'install', 'CC='+args.cc,
                     'OUT='+str(output), 'PYTHON='+sys.executable], cwd=root, env=tool_environment(), check=True)

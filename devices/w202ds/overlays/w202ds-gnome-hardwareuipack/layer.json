@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "w202ds-gnome-hardwareuipack",
+  "kind": "desktop-adaptation",
+  "build": "build.py",
+  "policies": {
+    "board-profile": {
+      "files": ["files/gnome"],
+      "disable": ["multi-user.target.wants/systemd-networkd.service"],
+      "verify": {
+        "absent": ["etc/systemd/system/multi-user.target.wants/systemd-networkd.service"]
+      },
+      "rootfs_artifacts": [{
+        "rootfs": "desktop-gnome/rootfs",
+        "required_elf": ["usr/libexec/w202-gnome-controls"]
+      }]
+    }
+  }
+}

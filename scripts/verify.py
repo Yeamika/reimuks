@@ -130,7 +130,7 @@ def verify_rootfs(path,profile,base_only=False):
             assert backend.DISTRIBUTION['id'] == DEFAULT, 'Legacy rootfs has no distribution identity'
         for name in members:
             assert not name.startswith('/') and '..' not in Path(name).parts,name
-            assert name.split('/',1)[0] not in ('host-rootfs','packages','layers','de-packages','work','output'),name
+            assert name.split('/',1)[0] not in ('host-rootfs','packages','layers','de-packages','board-packages','work','output'),name
         verify_base_metadata(members, read('etc/shadow').decode())
         assert members['etc/shadow'].uid==0
         assert members['etc/shadow'].mode & 0o007 == 0
