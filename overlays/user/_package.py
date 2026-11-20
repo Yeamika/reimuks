@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]/'scripts'))
 from user_overlay import pack, validate
 
 
-def archive_or_source(produce_source, existing, output, name, requires, check, board=None):
+def archive_or_source(produce_source, existing, output, name, requires, check, board=None, *, architecture='all'):
     output = output.expanduser()
     if output.exists() or output.is_symlink():
         raise ValueError(f'Use a new output directory: {output}')
@@ -34,7 +34,7 @@ def archive_or_source(produce_source, existing, output, name, requires, check, b
             with artifact.open('rb') as payload:
                 for chunk in iter(lambda: payload.read(1024*1024), b''):
                     digest.update(chunk)
-            receipt = dict(schema=1, id=name, architecture='all', private=True,
+            receipt = dict(schema=1, id=name, architecture=architecture, private=True,
                            requires=requires, files={artifact.name: digest.hexdigest()})
             if board:
                 receipt['board'] = board

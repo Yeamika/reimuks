@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -263,6 +264,46 @@ class ComposeTarget(unittest.TestCase):
             with tarfile.open(fileobj=bundle.extractfile('layers/kde-theme/kde-theme-overlay.tar.gz')) as overlay:
                 self.assertEqual(overlay.extractfile('home/reimuks/Pictures/Wallpapers/reimuks-wallpaper.png').read(),
                                  wallpaper.read_bytes())
+
+    @unittest.skipUnless(shutil.which('openssl'), 'requires openssl for TLS fixtures')
+    def test_rexeterm_only_packages_board_credentials_and_an_arm64_server(self):
+        self.layer('distribution', 'base.tar.gz', b'base')
+        self.recipe('distribution')
+        source = self.root/'rexeterm'
+        source.mkdir()
+        for role in ('server', 'client'):
+            subprocess.run(['openssl', 'req', '-x509', '-newkey', 'ec',
+                            '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1',
+                            '-subj', f'/CN={role}', '-keyout', f'{role}-key.pem',
+                            '-out', f'{role}-cert.pem'], cwd=source, check=True, capture_output=True)
+        binary = source/'rexed'
+        elf = b'\x7fELF\x02\x01\x01'+bytes(9)+b'\x03\x00'
+        option = f'--user-overlay=rexeterm={source}'
+
+        binary.write_bytes(elf+b'\x3e\x00')
+        wrong_arch = self.cli(option)
+        self.assertNotEqual(wrong_arch.returncode, 0)
+        self.assertIn('ARM64 Linux ELF', wrong_arch.stderr)
+        self.assertFalse(self.output.exists())
+
+        binary.write_bytes(elf+b'\xb7\x00')
+        result = self.cli(option)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.output.stat().st_mode & 0o777, 0o600)
+        with tarfile.open(self.output) as bundle:
+            receipt = json.load(bundle.extractfile('layers/rexeterm/package.json'))
+            self.assertEqual((receipt['private'], receipt['board'], receipt['architecture']),
+                             (True, 'w202ds', 'arm64'))
+            with tarfile.open(fileobj=bundle.extractfile('layers/rexeterm/rexeterm-overlay.tar.gz')) as layer:
+                config = 'home/reimuks/.config/rexed'
+                files = {member.name for member in layer if member.isfile()}
+                self.assertEqual(files, {f'{config}/{name}' for name in (
+                    'server-cert.pem', 'server-key.pem', 'server.json',
+                    'users/reimuks/client-cert.pem', 'users/reimuks/config.json',
+                )} | {'usr/bin/rexed', 'usr/lib/systemd/system/rexed.service'})
+                self.assertEqual(layer.getmember(f'{config}/server-key.pem').mode, 0o600)
+                self.assertEqual(layer.extractfile(f'{config}/users/reimuks/client-cert.pem').read(),
+                                 (source/'client-cert.pem').read_bytes())
 
 
 if __name__ == '__main__':

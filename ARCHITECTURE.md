@@ -8,4 +8,6 @@
 
 账号、SSH 授权和桌面偏好单独叠加。命名用户层默认从 `build/private-overlay-inputs/<board>/<id>/` 读取输入，也可传 `--user-overlay ID=PATH`。设备私有 NV 由 rootfs 配方单独引用，不进入公共层包。
 
+`rexeterm` 只安装板端 `rexed` 服务。私有输入为 ARM64 的 `rexed`、`server-cert.pem`、`server-key.pem` 和 `client-cert.pem`。
+
 组合预设输出层包归档；rootfs 预设把选定层安装到文件系统。内核镜像与 [EFI、initramfs](boot/readme.md) 是独立启动产物；分区和刷写在部署时处理。

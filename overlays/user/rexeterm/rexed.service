@@ -1,0 +1,20 @@
+[Unit]
+Description=Rexed remote executor
+After=network.target
+ConditionPathExists=/home/reimuks/.config/rexed/server.json
+
+[Service]
+User=reimuks
+WorkingDirectory=/home/reimuks
+RuntimeDirectory=rexed
+RuntimeDirectoryMode=0700
+LogsDirectory=rexed
+LogsDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/bin/rexed --id %H --config-dir /home/reimuks/.config/rexed --listen tls://0.0.0.0:45957 --admin-listen unix:///run/rexed/admin.sock
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

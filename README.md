@@ -17,7 +17,7 @@ python3 reimuks.py --board w202ds --preset debian-niri --plan
 | [小米 MIX 2S](devices/polaris/) `polaris` | `debian-server` | 层包归档 `.tar` |
 
 - `--app-overlay` 叠加 `remote`、`tui-app-basic` 或 `gui-test`，可重复指定。
-- `--user-overlay` 叠加 `passkey` 或 `kde-theme`，可重复指定；私有输入可用 `--user-input-root` 指定。
+- `--user-overlay` 叠加 `passkey`、`kde-theme` 或 `rexeterm`，可重复指定；私有输入可用 `--user-input-root` 指定。
 - `--clean` 替换默认路径下同名的 rootfs 预设成品，保留共享层包和下载缓存。
 
 层包默认从 `build/packages/` 读取，成品默认写到 `build/boards/<board>/artifacts/targets/`。
